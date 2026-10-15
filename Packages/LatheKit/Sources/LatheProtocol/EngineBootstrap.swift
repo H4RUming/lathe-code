@@ -124,8 +124,13 @@ public enum EngineBootstrap {
         ] where result != 0 {
             throw SocketTransportError.systemCall("spawn setup", result)
         }
-        let argv = [executableURL.path, "--root", paths.directory.path].map { strdup($0) }
-        let environment = ProcessInfo.processInfo.environment.map { strdup("\($0.key)=\($0.value)") }
+        // Make the String-to-C-pointer bridge explicit across Swift toolchains.
+        let argv: [UnsafeMutablePointer<CChar>?] = [executableURL.path, "--root", paths.directory.path].map { value in
+            value.withCString { Darwin.strdup($0) }
+        }
+        let environment: [UnsafeMutablePointer<CChar>?] = ProcessInfo.processInfo.environment.map { entry in
+            "\(entry.key)=\(entry.value)".withCString { Darwin.strdup($0) }
+        }
         defer {
             argv.forEach { free($0) }
             environment.forEach { free($0) }
