@@ -93,22 +93,27 @@ private struct TransportFixture: Sendable {
         try await running.value
     }
 
-    @Test func deadlineAndBrokenPeerReturnErrorsWithoutSignals() async throws {
+    @Test func deadlineAndShutdownReturnErrorsWithoutSignals() async throws {
         var pair: [Int32] = [0, 0]
-        #expect(socketpair(AF_UNIX, SOCK_STREAM, 0, &pair) == 0)
+        try #require(socketpair(AF_UNIX, SOCK_STREAM, 0, &pair) == 0)
         let reader = pair[0], writer = pair[1]
-        defer { close(reader) }
+        defer { close(reader); close(writer) }
         try SocketIO.configure(reader)
+        try SocketIO.configure(writer)
         do {
             _ = try SocketIO.readFrame(reader, deadline: SocketIO.deadline(after: 0.05))
             Issue.record("응답 없는 peer의 deadline이 무시되었습니다.")
         } catch SocketTransportError.timeout { }
-        close(writer)
+        // Closing a peer descriptor does not guarantee the endpoint is gone:
+        // another process may briefly hold a reference during parallel spawn.
+        // Explicitly shut down this endpoint's write side to exercise EPIPE
+        // and SO_NOSIGPIPE independently of descriptor lifetime elsewhere.
+        try #require(shutdown(reader, SHUT_WR) == 0)
         do {
             try SocketIO.writeFrame(reader, payload: Data([1]), deadline: SocketIO.deadline())
-            Issue.record("닫힌 peer에 쓰기가 성공했습니다.")
+            Issue.record("shutdown한 쓰기 방향에 쓰기가 성공했습니다.")
         } catch SocketTransportError.systemCall(_, let code) {
-            #expect(code == EPIPE || code == ECONNRESET)
+            #expect(code == EPIPE)
         }
     }
 
