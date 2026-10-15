@@ -3,11 +3,40 @@ import LatheDomain
 import LatheProtocol
 import LatheRuntime
 
-struct EngineService: Sendable {
+actor EngineService {
     let runtime: EngineRuntime
     let info: EngineInfo
+    private var accepting = true
+    private var activeRequests = 0
+    private var drainWaiters: [CheckedContinuation<Void, Never>] = []
+
+    init(runtime: EngineRuntime, info: EngineInfo) {
+        self.runtime = runtime; self.info = info
+    }
+
+    /// Admission closes before runtime shutdown; requests that were already
+    /// admitted are drained before the host releases its data-directory lease.
+    func closeAdmission() { accepting = false }
+
+    func drain() async {
+        guard activeRequests > 0 else { return }
+        await withCheckedContinuation { drainWaiters.append($0) }
+    }
 
     func handle(_ data: Data) async -> Data {
+        guard accepting else {
+            let id = (try? WireCodec.decode(RPCRequest.self, from: data))?.id
+            return encode(.init(id: id, error: .init(code: -32009, message: "Engine host is stopping.")))
+        }
+        activeRequests += 1
+        defer {
+            activeRequests -= 1
+            if activeRequests == 0 {
+                let waiters = drainWaiters
+                drainWaiters.removeAll()
+                waiters.forEach { $0.resume() }
+            }
+        }
         let request: RPCRequest
         do { request = try WireCodec.decode(RPCRequest.self, from: data) }
         catch {

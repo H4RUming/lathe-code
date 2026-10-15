@@ -12,6 +12,8 @@
 		A10000000000000000000004 /* EngineSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000004 /* EngineSettingsView.swift */; };
 		A10000000000000000000010 /* LatheDomain in Frameworks */ = {isa = PBXBuildFile; productRef = A90000000000000000000001 /* LatheDomain */; };
 		A10000000000000000000011 /* LatheProtocol in Frameworks */ = {isa = PBXBuildFile; productRef = A90000000000000000000002 /* LatheProtocol */; };
+		A10000000000000000000005 /* AppLifecycle.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000005 /* AppLifecycle.swift */; };
+		A10000000000000000000012 /* LatheEngineHost in Frameworks */ = {isa = PBXBuildFile; productRef = A90000000000000000000003 /* LatheEngineHost */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -20,15 +22,16 @@
 		A20000000000000000000003 /* WorkspaceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkspaceView.swift; sourceTree = "<group>"; };
 		A20000000000000000000004 /* EngineSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EngineSettingsView.swift; sourceTree = "<group>"; };
 		A20000000000000000000010 /* Lathe.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Lathe.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A20000000000000000000005 /* AppLifecycle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppLifecycle.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
-		A30000000000000000000001 /* Frameworks */ = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (A10000000000000000000010, A10000000000000000000011,); runOnlyForDeploymentPostprocessing = 0; };
+		A30000000000000000000001 /* Frameworks */ = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (A10000000000000000000010, A10000000000000000000011, A10000000000000000000012,); runOnlyForDeploymentPostprocessing = 0; };
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
 		A40000000000000000000001 = {isa = PBXGroup; children = (A40000000000000000000002 /* Sources */, A40000000000000000000003 /* Products */,); sourceTree = "<group>"; };
-		A40000000000000000000002 /* Sources */ = {isa = PBXGroup; children = (A20000000000000000000001, A20000000000000000000002, A20000000000000000000003, A20000000000000000000004,); path = Sources; sourceTree = "<group>"; };
+		A40000000000000000000002 /* Sources */ = {isa = PBXGroup; children = (A20000000000000000000001, A20000000000000000000002, A20000000000000000000003, A20000000000000000000004, A20000000000000000000005,); path = Sources; sourceTree = "<group>"; };
 		A40000000000000000000003 /* Products */ = {isa = PBXGroup; children = (A20000000000000000000010 /* Lathe.app */,); name = Products; sourceTree = "<group>"; };
 /* End PBXGroup section */
 
@@ -36,11 +39,11 @@
 		A50000000000000000000001 /* Lathe */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = A80000000000000000000002;
-			buildPhases = (A30000000000000000000002 /* Sources */, A30000000000000000000001 /* Frameworks */, A30000000000000000000003 /* Embed engine */,);
+			buildPhases = (A30000000000000000000002 /* Sources */, A30000000000000000000001 /* Frameworks */, A30000000000000000000003 /* Embed runner */,);
 			buildRules = ();
 			dependencies = ();
 			name = Lathe;
-			packageProductDependencies = (A90000000000000000000001, A90000000000000000000002,);
+			packageProductDependencies = (A90000000000000000000001, A90000000000000000000002, A90000000000000000000003,);
 			productName = Lathe;
 			productReference = A20000000000000000000010 /* Lathe.app */;
 			productType = "com.apple.product-type.application";
@@ -66,14 +69,14 @@
 /* End PBXProject section */
 
 /* Begin PBXShellScriptBuildPhase section */
-		A30000000000000000000003 /* Embed engine */ = {
+		A30000000000000000000003 /* Embed runner */ = {
 			isa = PBXShellScriptBuildPhase;
 			alwaysOutOfDate = 1;
 			buildActionMask = 2147483647;
 			files = ();
 			inputPaths = ();
-			name = "Build and embed engine";
-			outputPaths = ("$(TARGET_BUILD_DIR)/$(CONTENTS_FOLDER_PATH)/Helpers/lathe-engine", "$(TARGET_BUILD_DIR)/$(CONTENTS_FOLDER_PATH)/Helpers/lathe-runner",);
+			name = "Build and embed runner";
+			outputPaths = ("$(TARGET_BUILD_DIR)/$(CONTENTS_FOLDER_PATH)/Helpers/lathe-runner",);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
 			shellScript = "\"${SRCROOT}/embed-engine.sh\"\n";
@@ -81,7 +84,7 @@
 /* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
-		A30000000000000000000002 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (A10000000000000000000001, A10000000000000000000002, A10000000000000000000003, A10000000000000000000004,); runOnlyForDeploymentPostprocessing = 0; };
+		A30000000000000000000002 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (A10000000000000000000001, A10000000000000000000002, A10000000000000000000003, A10000000000000000000004, A10000000000000000000005,); runOnlyForDeploymentPostprocessing = 0; };
 /* End PBXSourcesBuildPhase section */
 
 /* Begin XCBuildConfiguration section */
@@ -147,6 +150,7 @@
 /* Begin XCSwiftPackageProductDependency section */
 		A90000000000000000000001 /* LatheDomain */ = {isa = XCSwiftPackageProductDependency; package = A90000000000000000000010; productName = LatheDomain; };
 		A90000000000000000000002 /* LatheProtocol */ = {isa = XCSwiftPackageProductDependency; package = A90000000000000000000010; productName = LatheProtocol; };
+		A90000000000000000000003 /* LatheEngineHost */ = {isa = XCSwiftPackageProductDependency; package = A90000000000000000000010; productName = LatheEngineHost; };
 /* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = A60000000000000000000001 /* Project object */;

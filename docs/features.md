@@ -6,13 +6,13 @@
 
 ## 1. 최종 목표와 대응 수준
 
-최종 목표는 Claude Code를 사용하는 주요 코딩 작업을 **Swift 기반 macOS 네이티브 앱과 CLI에서 여러 모델 프로바이더로 수행하는 것**이다. 초기 수직 구현은 첫 검증 지점이며 최종 기능 범위를 축소하는 기준이 아니다. 파일 도구 몇 개와 채팅을 연결한 상태를 동등 기능 완성으로 부르지 않는다.
+최종 목표는 Claude Code를 사용하는 주요 코딩 작업을 **하나의 Swift 기반 macOS 네이티브 앱에서 여러 모델 프로바이더로 수행하는 것**이다. 별도 상주 engine·시스템 CLI·로그인 agent를 설치하지 않는다. CLI와 독립 engine은 명시적인 개발·검증 빌드에서만 쓰며 일반 배포는 앱 하나다. 초기 수직 구현은 첫 검증 지점이며 최종 기능 범위를 축소하는 기준이 아니다. 파일 도구 몇 개와 채팅을 연결한 상태를 동등 기능 완성으로 부르지 않는다.
 
 비교 기준은 위 확인일에 접근 가능한 Claude Code 공식 문서의 사용자 동작이다. 이후 추가된 기능은 기준일·출처·추가 요구사항을 기록하고 비교표를 갱신한다. Claude Code 내부 구현·계정 entitlement·전용 클라우드 서비스를 복제한다는 뜻은 아니다. 모델의 추론 품질, 특정 문제의 정답, 응답 문구, latency까지 같다고 보장하지 않는다.
 
 | 분류 | 의미 | 완료 판정 |
 | --- | --- | --- |
-| **L: 로컬 필수** | Lathe가 자체 제공하는 작업 흐름. 탐색·수정·명령·계획·권한·세션·기억·작업·CLI 등 | 지원 모델을 붙였을 때 동일 목적의 작업을 끝낼 수 있고, 실패·취소·복구까지 시험함 |
+| **L: 로컬 필수** | Lathe가 자체 제공하는 작업 흐름. 탐색·수정·명령·계획·권한·세션·기억·작업 등 | 지원 모델을 붙였을 때 동일 목적의 작업을 끝낼 수 있고, 실패·취소·복구까지 시험함 |
 | **P: 프로바이더 조건부** | 이미지 이해, reasoning 표시, structured output, context 한도, hosted search 등 모델/API에 종속 | 지원 여부를 확인하고 지원 조합에서 검증. 미지원 조합은 이유와 대안을 표시 |
 | **I: 외부 연동** | GitHub, 검색 서비스, 브라우저, IDE, 원격 제어, hosted 실행 등 별도 계정·실행 환경 필요 | 연동 계약·권한·연결 상태·오류를 정의하고 실제 연결 환경에서 검증 |
 
@@ -170,18 +170,18 @@ Plan 진입은 세션 소유 writer/process의 중지·대기와 mutation hook/�
 | **LAT-TASK-004 / L** agent 수명 | 대기·진행·질문·승인·실패·중단·완료, 메시지 전송, 재개, 결과 handoff를 지원한다. 부모 취소가 child에 미치는 정책을 명시한다. | 죽은 child에게 메시지를 전송하면 재개/실패가 구분된다. 승인 요청에는 실제 요청 agent와 workspace가 표시된다. |
 | **LAT-TASK-005 / L** 팀 협업 | coordinator와 peer agent, 공유 task board, 주소 지정 메시지, 파일 소유 범위와 통합 검토를 제공한다. | 두 agent가 독립 worktree에서 변경하고 coordinator가 diff·테스트 결과를 검토해 통합한다. 메시지가 사용자 승인으로 승격되지 않는다. |
 | **LAT-TASK-006 / L** 관찰·주기 작업 | log tail·파일 변화·명령 상태 관찰과 세션 단위 일회/반복 prompt를 제공한다. 조건·주기·종료·취소·중복 실행 방지를 저장한다. | 상태가 그대로면 모델을 무한 호출하지 않는다. 사용자 취소 후 다음 예약이 실행되지 않는다. 잠자기·앱 종료·재개 시 missed-run 정책이 명시된다. |
-| **LAT-TASK-007 / L** 상주 실행 | 창을 닫아도 실행을 유지할지, 앱 종료 시 중지할지 선택한다. 지속 예약은 별도 background service와 실행 상태 조회를 사용한다. | service가 설치되지 않았으면 앱 종료 뒤 계속 실행된다고 표시하지 않는다. 재시작이 비멱등 작업을 자동 반복하지 않는다. |
+| **LAT-TASK-007 / L** 앱 작업 수명 | 진행 중 작업이나 미전송 입력이 있을 때 마지막 작업 창 닫기·종료에서 중단 후 종료/백그라운드 유지/취소를 선택한다. 미완료 작업이 없으면 바로 종료한다. runtime과 작업의 owner는 앱 프로세스다. | 앱 종료 뒤 독립 engine·로그인 agent가 남지 않는다. 중단은 runner 정리까지 기다리고, 재시작은 불명확한 비멱등 작업을 자동 반복하지 않는다. |
 | **LAT-TASK-008 / L+P** 목표 반복 실행 | 완료 조건·증거·예산·중단 조건을 저장하고 turn 종료마다 별도 평가로 달성·계속·차단을 판정한다. 사용자 중지·목표 변경·진행 없음·회복 불가능한 오류를 처리한다. 평가기의 provider/model을 선택하고 비용에 합산한다. | 작업 모델의 완료 선언만으로 성공하지 않는다. 평가 결과와 근거가 기록되고 계속 판정이어도 시간·turn·비용 상한을 넘지 않는다. 목표 설정이 tool 권한을 변경하지 않는다. |
 | **LAT-TASK-009 / L** 지속 로컬 예약 | 세션 밖에서 예약 이름·prompt revision·workspace/ref·모델·권한 profile·시간대·일정·실행 이력을 저장한다. 새 run/session, 지금 실행, 수정, 일시 정지, 삭제를 제공한다. | 재시작 후 일정이 남는다. DST·잠자기·오프라인·중복 due 이벤트를 시험하며 catch-up/skip, 동시 실행 금지, 실패 재시도 정책대로 한 번만 실행한다. 기존 checkout과 매 실행 worktree를 구분한다. |
 | **LAT-TASK-010 / L** script workflow | 검토 가능한 script가 agent 실행·순서·조건 분기·반복·fan-out/fan-in·결과 취합을 정의한다. script revision, 입력 schema, phase, agent 결과, 재사용 명령, 중지·재개를 지원한다. | 다중 파일 migration을 병렬 실행하고 검증 phase를 거쳐 요약한다. 완료 step은 재개 시 재실행하지 않고 효과가 불명확한 step은 확인을 요구한다. script 자체에는 임의 파일·shell 접근을 주지 않고 agent tool broker를 거친다. |
 
-참고 동작: Claude Code는 세션 내 예약 prompt, turn 종료 뒤 목표 평가, Desktop의 지속 로컬 예약, cloud routine을 구분한다. Desktop 로컬 예약은 일정이 재시작을 넘어 보존되지만 실행에는 앱과 깨어 있는 컴퓨터가 필요하다. Lathe의 background service는 별도 설계이며 컴퓨터가 꺼진 상태의 실행을 보장하지 않는다. [세션 예약](https://code.claude.com/docs/en/scheduled-tasks), [goal](https://code.claude.com/docs/en/goal), [Desktop 예약](https://code.claude.com/docs/en/desktop-scheduled-tasks)
+참고 동작: Claude Code는 세션 내 예약 prompt, turn 종료 뒤 목표 평가, Desktop의 지속 로컬 예약, cloud routine을 구분한다. Desktop 로컬 예약은 일정이 재시작을 넘어 보존되지만 실행에는 앱과 깨어 있는 컴퓨터가 필요하다. Lathe는 앱이 살아 있는 동안만 로컬 예약을 실행한다. 앱 밖 background service나 로그인 agent를 설치하지 않으며 컴퓨터가 꺼진 상태의 실행을 보장하지 않는다. [세션 예약](https://code.claude.com/docs/en/scheduled-tasks), [goal](https://code.claude.com/docs/en/goal), [Desktop 예약](https://code.claude.com/docs/en/desktop-scheduled-tasks)
 
 | 실행 방식 | 다음 작업을 시작하는 조건 | 보존 단위 | Lathe 구현 경계 |
 | --- | --- | --- | --- |
-| session loop/watch | 시간 경과 또는 관찰 상태 변화 | 기존 session과 task | LAT-TASK-006; 유지 중인 engine/runner 필요 |
+| session loop/watch | 시간 경과 또는 관찰 상태 변화 | 기존 session과 task | LAT-TASK-006; 실행 중인 Lathe 앱/runner 필요 |
 | goal | turn 종료 후 완료 조건 미달 | session goal revision과 평가 이력 | LAT-TASK-008; 예산·권한 정책 유지 |
-| 로컬 예약 | 저장된 일정의 due 시점 | session과 독립적인 schedule | LAT-TASK-009; Mac이 실행 가능해야 함 |
+| 로컬 예약 | 저장된 일정의 due 시점 | session과 독립적인 schedule | LAT-TASK-009; Lathe 앱과 Mac이 실행 중이어야 함 |
 | script workflow | script의 dependency·분기 조건 | workflow run·step journal | LAT-TASK-010; scheduler가 실행 순서를 결정 |
 | hosted routine | 원격 일정·API·외부 이벤트 | 원격 routine과 run | LAT-INTEGRATION-007; 별도 executor/서비스 필요 |
 
@@ -205,20 +205,20 @@ Plan 진입은 세션 소유 writer/process의 중지·대기와 mutation hook/�
 
 Lathe 개발 저장소에서 모든 변경을 커밋하는 팀의 개발 규칙과, 완성 앱이 사용자의 저장소를 언제 commit/push하는지는 별개다. 앱은 명시적 요청 또는 사용자가 저장한 프로젝트 자동화 정책에 따라 Git 변경을 수행한다.
 
-## 9. CLI·headless·자동화
+## 9. 개발 client·headless 검증·자동화
 
 참고 동작: Claude Code는 비대화형 실행, stdin, text/JSON/stream-json 출력, resume, tool 제한, schema 출력 등을 제공한다. [headless 실행](https://code.claude.com/docs/en/headless), [CLI reference](https://code.claude.com/docs/en/cli-reference)
 
 | ID / 분류 | Lathe 요구사항 | 수용 기준 |
 | --- | --- | --- |
-| **LAT-CLI-001 / L** 같은 엔진 | `lathe` executable과 GUI가 local IPC로 동일한 Swift engine의 provider·context·tool·permission·session 동작을 사용한다. workspace와 connection/model을 옵션으로 선택한다. | GUI와 CLI로 같은 fixture를 실행했을 때 권한·파일 결과·session 형식이 동일하다. GUI를 띄우지 않아도 실행할 수 있고, 두 client가 붙어도 같은 run을 중복 시작하지 않는다. |
+| **LAT-CLI-001 / L** 같은 앱 runtime | 선택적으로 빌드한 개발 `lathe` client가 local IPC로 실행 중인 앱의 provider·context·tool·permission·session 동작을 사용한다. 배포 앱과 별도로 설치하지 않는다. | 앱이 없으면 기본 client는 연결 오류로 끝나며 daemon을 만들지 않는다. 명시적인 개발 engine/데이터 root를 지정한 CI harness만 독립 실행할 수 있다. 두 client가 같은 run을 중복 시작하지 않는다. |
 | **LAT-CLI-002 / L** 입출력 계약 | prompt 인자/stdin, text, 최종 JSON, 버전 있는 NDJSON event stream을 제공한다. stdout 데이터와 stderr 진단을 분리한다. | stream consumer가 모든 이벤트를 JSON으로 parse할 수 있다. 종료 이벤트는 성공·실패·취소·승인 부재를 구분한다. |
 | **LAT-CLI-003 / L** 무인 권한 | 사람이 없는 실행에서는 규칙으로 해결되지 않은 승인을 거절하거나 `needsApproval`로 종료한다. 한도·tool subset·bare profile을 지원한다. | CI가 승인창을 기다리며 영구 대기하지 않는다. headless 전환만으로 bypass 권한이 켜지지 않는다. |
 | **LAT-CLI-004 / L+P** 구조화 결과 | 최종 결과에 JSON Schema를 지정하고 검증한다. provider native structured output과 로컬 검증/제한된 repair를 구분한다. | schema 오류는 명확한 실패로 끝나며 무제한 repair하지 않는다. tool workflow와 최종 JSON 결과를 혼합하지 않는다. |
 | **LAT-CLI-005 / L** 재개·관찰 | session ID resume/fork, 실행 목록·상태·event cursor 조회, stop, SIGINT/SIGTERM을 지원한다. | 중지 시 subprocess cleanup과 저장을 시험한다. 관찰 연결이 끊겨도 실행 owner의 정책대로 동작한다. |
-| **LAT-CLI-006 / I** CI 연동 | GitHub Actions 등 외부 실행 환경에서 CLI를 호출하고 결과·diff·log를 artifact로 남길 수 있는 예제를 제공한다. | macOS runner의 mock provider 실행을 재현한다. 실제 API key는 fixture·출력·저장소에 넣지 않는다. |
+| **LAT-CLI-006 / I** CI 연동 | GitHub Actions에서 명시적인 개발 빌드/harness로 client를 호출하고 결과·diff·log를 남긴다. 일반 배포 artifact에는 앱만 담는다. | macOS runner의 mock provider 실행을 재현한다. 실제 API key는 fixture·출력·저장소에 넣지 않는다. |
 
-제안 명령 표면은 `lathe run`, `lathe sessions`, `lathe resume`, `lathe fork`, `lathe tasks`, `lathe stop`, `lathe doctor`다. 정확한 flags와 event schema는 구현 전에 별도 계약으로 고정한다. Claude CLI와 모든 flag 이름이 동일하다고 주장하지 않는다.
+이 절의 CLI 요구사항 ID는 개발·자동화 검증 계약으로 보존하며 별도 제품 설치를 요구하지 않는다. 제안 명령 표면은 `lathe run`, `lathe sessions`, `lathe resume`, `lathe fork`, `lathe tasks`, `lathe stop`, `lathe doctor`다. 정확한 flags와 event schema는 구현 전에 별도 계약으로 고정한다. Claude CLI와 모든 flag 이름이 동일하다고 주장하지 않는다.
 
 ## 10. 네이티브 앱과 프로바이더 경험
 
@@ -312,7 +312,7 @@ Lathe 개발 저장소에서 모든 변경을 커밋하는 팀의 개발 규칙�
 | **E2E-04 장기 세션** | LAT-CTX-001~004, LAT-MEM-001~004 | 긴 tool 출력→compaction→provider 변경→목표·지침 유지→새 세션 기억 |
 | **E2E-05 병렬 구현** | LAT-TASK-001~005, LAT-GIT-003/004 | 조사 agent와 두 worktree writer→실패/승인 처리→결과 검토·통합 |
 | **E2E-06 혼합 입력** | LAT-TOOL-005/011~014 | 문서 검색·이미지/PDF·notebook 입력→근거 있는 수정과 실제 검증 |
-| **E2E-07 무인 작업** | LAT-CLI-001~006, LAT-PERM-001/006 | stdin prompt→허용 tool 실행→JSON stream→중지/오류 exit→artifact |
+| **E2E-07 개발 자동화** | LAT-CLI-001~006, LAT-PERM-001/006 | 명시적 test harness 또는 실행 중 앱에 연결→stdin prompt→허용 tool→JSON stream→중지/오류 exit. 기본 client가 daemon을 만들지 않음 |
 | **E2E-08 모든 연결** | LAT-PROVIDER-001~005 | 여섯 필수 연결과 별도 호환 서버, 원격 vLLM/Ollama에서 최소 E2E-01·03 수행 |
 | **E2E-09 실행 격리** | LAT-PERM-005~007, LAT-TASK-003 | 악성 project 설정·tool 출력·경로 우회·부모 권한 확대 요청이 실행 정책을 바꾸지 않음 |
 | **E2E-10 지속 작업** | LAT-TASK-002/006~009 | watch·goal·로컬 예약을 각기 실행→sleep/재시작→중복 방지→상태 변경 알림→취소 |

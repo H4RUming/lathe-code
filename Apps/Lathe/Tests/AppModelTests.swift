@@ -151,6 +151,155 @@ struct AppModelTests {
         #expect(model.toolInvocations[invocation.runID]?.first == invocation)
     }
 
+    @Test func shutdownBeforeConnectionNeverStartsTheHost() async {
+        let engine = FixtureEngine()
+        let host = FixtureHost(engineID: engine.firstID)
+        let model = LatheAppModel(client: engine, host: host)
+        await model.shutdown()
+        await model.connect()
+        #expect(model.isShuttingDown)
+        #expect(!model.isConnected)
+        #expect(await host.startCount == 0)
+        #expect(await host.stopCount == 1)
+        #expect(await engine.connectionCount == 0)
+    }
+
+    @Test func shutdownDuringHostStartupRejectsLateConnection() async throws {
+        let engine = FixtureEngine()
+        let host = FixtureHost(engineID: engine.firstID)
+        await host.holdStart()
+        let model = LatheAppModel(client: engine, host: host)
+        let connecting = Task { await model.connect() }
+        try await waitUntil { await host.startCount == 1 }
+        // Shutdown must not wait indefinitely for a connection which has not
+        // started listening, nor let its delayed reply reactivate the model.
+        await model.shutdown()
+        #expect(await host.stopCount == 1)
+        await host.releaseStart()
+        await connecting.value
+        #expect(!model.isConnected)
+        #expect(!model.isConnecting)
+        #expect(await engine.connectionCount == 0)
+    }
+
+    @Test func idleConnectionInFlightCanQuitWithoutWaitingForItsReply() async throws {
+        let engine = FixtureEngine()
+        await engine.holdConnection()
+        let host = FixtureHost(engineID: engine.firstID)
+        let model = LatheAppModel(client: engine, host: host)
+        let connecting = Task { await model.connect() }
+        try await waitUntil { await engine.connectionCount == 1 }
+        model.beginExitDecision()
+        #expect(!(await model.requiresTerminationConfirmation()))
+        await model.shutdown()
+        #expect(await host.stopCount == 1)
+        await engine.releaseConnection()
+        await connecting.value
+        #expect(!model.isConnected)
+        #expect(model.isShuttingDown)
+    }
+
+    @Test func ownedHostStartupFailureNeverAttachesToAnotherEngine() async throws {
+        let engine = FixtureEngine()
+        let host = FixtureHost(engineID: engine.firstID)
+        await host.failStart()
+        let model = LatheAppModel(client: engine, host: host)
+        await model.connect()
+        #expect(!model.isConnected)
+        #expect(await engine.connectionCount == 0)
+        #expect(model.errorMessage != nil)
+        await model.shutdown()
+    }
+
+    @Test func mismatchedHostIdentityRejectsConnectionBeforeLoadingSessions() async {
+        let engine = FixtureEngine()
+        let host = FixtureHost(engineID: UUID())
+        let model = LatheAppModel(client: engine, host: host)
+        await model.connect()
+        #expect(!model.isConnected)
+        #expect(model.sessions.isEmpty)
+        #expect(model.errorMessage?.contains("소유한 엔진") == true)
+        await model.shutdown()
+    }
+
+    @Test func shutdownWaitsForOwnedHostCleanupAndCoalescesQuitRequests() async throws {
+        let engine = FixtureEngine()
+        let host = FixtureHost(engineID: engine.firstID)
+        let model = LatheAppModel(client: engine, host: host)
+        await model.connect()
+        await host.holdStop()
+        var firstReturned = false
+        let first = Task { await model.shutdown(); firstReturned = true }
+        try await waitUntil { await host.stopCount == 1 }
+        let second = Task { await model.shutdown() }
+        model.draft = "must not be admitted during cleanup"
+        model.sendPrompt()
+        await model.connect()
+        #expect(!model.canSubmit)
+        #expect(!firstReturned)
+        #expect(await engine.submissionCount == 0)
+        #expect(await engine.connectionCount == 1)
+        #expect(await host.stopCount == 1)
+        await host.releaseStop()
+        await first.value
+        await second.value
+        #expect(firstReturned)
+        #expect(await host.stopCount == 1)
+    }
+
+    @Test func pendingSubmissionRequiresDecisionAndLateReplyCannotReopenAdmission() async throws {
+        let engine = FixtureEngine()
+        await engine.holdSubmission()
+        let model = LatheAppModel(client: engine, host: FixtureHost(engineID: engine.firstID))
+        await model.connect()
+        model.draft = "pending submit"
+        model.sendPrompt()
+        try await waitUntil { await engine.submissionCount == 1 }
+        model.beginExitDecision()
+        #expect(await model.requiresTerminationConfirmation())
+        await model.shutdown()
+        await engine.releaseSubmission()
+        try await waitUntil { !model.isSubmitting }
+        #expect(model.isShuttingDown)
+        #expect(!model.isConnected)
+        #expect(!model.canSubmit)
+    }
+
+    @Test func terminationReadsActiveRunMetadataFromUnselectedSession() async throws {
+        let engine = FixtureEngine()
+        let model = LatheAppModel(client: engine)
+        await model.connect()
+        #expect(!model.hasUnfinishedWork)
+        // A CLI can start work after the last UI snapshot; list rows have no runs.
+        await engine.seedUnselectedActiveRun()
+        model.beginExitDecision()
+        #expect(await model.requiresTerminationConfirmation())
+        #expect(model.sessions.last?.runs.isEmpty == true)
+        #expect(model.sessions.last?.activeRunID != nil)
+        #expect(model.selectedSession?.activeRunID == nil)
+    }
+
+    @Test func cancellingExitPreservesDraftsAcrossSessionsAndRestoresAdmission() async throws {
+        let engine = FixtureEngine()
+        let model = LatheAppModel(client: engine)
+        await model.connect()
+        model.draft = "unsent first session draft"
+        model.selectSession(engine.secondID)
+        try await waitUntil { model.selectedSession?.id == engine.secondID }
+        #expect(model.draft.isEmpty)
+        model.beginExitDecision()
+        #expect(await model.requiresTerminationConfirmation())
+        #expect(!model.acceptsUserActions)
+        model.cancelExitDecision()
+        model.selectSession(engine.firstID)
+        try await waitUntil { model.selectedSession?.id == engine.firstID }
+        #expect(model.draft == "unsent first session draft")
+        #expect(model.canSubmit)
+        model.draft = ""
+        #expect(!model.hasUnsentDrafts)
+        #expect(!(await model.requiresTerminationConfirmation()))
+    }
+
     private func waitUntil(_ condition: @MainActor () async -> Bool) async throws {
         for _ in 0..<200 {
             if await condition() { return }
@@ -161,6 +310,34 @@ struct AppModelTests {
 }
 
 private enum CheckFailure: Error { case timedOut }
+
+private actor FixtureHost: AppEngineHost {
+    let engineID: UUID
+    init(engineID: UUID) { self.engineID = engineID }
+    private(set) var startCount = 0
+    private(set) var stopCount = 0
+    private var holdsStart = false
+    private var holdsStop = false
+    private var rejectsStart = false
+    private var startGate: CheckedContinuation<Void, Never>?
+    private var stopGate: CheckedContinuation<Void, Never>?
+
+    func start() async throws -> EngineInfo {
+        startCount += 1
+        if rejectsStart { throw LatheError.conflict("fixture data directory already owned") }
+        if holdsStart { await withCheckedContinuation { startGate = $0 } }
+        return EngineInfo(processID: 1, engineID: engineID)
+    }
+    func stop() async {
+        stopCount += 1
+        if holdsStop { await withCheckedContinuation { stopGate = $0 } }
+    }
+    func holdStart() { holdsStart = true }
+    func holdStop() { holdsStop = true }
+    func failStart() { rejectsStart = true }
+    func releaseStart() { holdsStart = false; startGate?.resume(); startGate = nil }
+    func releaseStop() { holdsStop = false; stopGate?.resume(); stopGate = nil }
+}
 
 private actor FixtureEngine: AppEngineClient {
     nonisolated let firstID = UUID()
@@ -174,6 +351,7 @@ private actor FixtureEngine: AppEngineClient {
     private(set) var approvalCount = 0
     private(set) var approvalHash: String?
     private var completedRun: RunSnapshot?
+    private var metadataOnlyRunID: UUID?
     private var failSnapshot = false
     private var hasEvent = false
     private var submissionFailure: RPCFailure?
@@ -247,6 +425,7 @@ private actor FixtureEngine: AppEngineClient {
         tool = snapshot
         return snapshot
     }
+    func seedUnselectedActiveRun() { metadataOnlyRunID = UUID() }
     func holdApproval() { holdsApproval = true }
     func releaseApproval() { holdsApproval = false; approvalGate?.resume(); approvalGate = nil }
 
@@ -274,6 +453,6 @@ private actor FixtureEngine: AppEngineClient {
     func releaseConnection() { holdsConnection = false; connectionGate?.resume(); connectionGate = nil }
 
     private func snapshot(id: UUID) -> SessionSnapshot {
-        SessionSnapshot(id: id, title: id == firstID ? "First" : "Second", workspacePath: "/tmp", runs: id == firstID ? completedRun.map { [$0] } ?? [] : [])
+        SessionSnapshot(id: id, title: id == firstID ? "First" : "Second", workspacePath: "/tmp", runs: id == firstID ? completedRun.map { [$0] } ?? [] : [], activeRunID: id == secondID ? metadataOnlyRunID : nil)
     }
 }

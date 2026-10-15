@@ -35,6 +35,7 @@ struct WorkspaceView: View {
                         Button { Task { await model.connect() } } label: { Image(systemName: "arrow.clockwise") }
                             .buttonStyle(.plain).help("엔진에 다시 연결")
                             .accessibilityLabel("엔진에 다시 연결")
+                            .disabled(!model.acceptsUserActions)
                     }
                 }
                 .padding(14)
@@ -43,11 +44,11 @@ struct WorkspaceView: View {
             .toolbar {
                 ToolbarItem {
                     Button { model.chooseProject() } label: { Label("프로젝트 열기", systemImage: "folder.badge.plus") }
-                        .disabled(!model.isConnected || model.isCreatingSession)
+                        .disabled(!model.acceptsUserActions || !model.isConnected || model.isCreatingSession)
                 }
                 ToolbarItem {
                     Button { model.newSession() } label: { Label("새 세션", systemImage: "square.and.pencil") }
-                        .disabled(!model.isConnected || model.isCreatingSession)
+                        .disabled(!model.acceptsUserActions || !model.isConnected || model.isCreatingSession)
                 }
             }
         } detail: {
@@ -90,19 +91,19 @@ private struct WelcomeView: View {
                 .font(.system(size: 42, weight: .light)).foregroundStyle(.tint)
             VStack(spacing: 10) {
                 Text("작업을 시작할 공간").font(.system(size: 27, weight: .semibold))
-                Text("프로젝트를 열고 공유 엔진과 대화해 보세요.")
+                Text("프로젝트를 열고 작업을 시작하세요.")
                     .font(.body).foregroundStyle(.secondary)
             }
             Button("프로젝트 열기…") { model.chooseProject() }
                 .buttonStyle(.borderedProminent).controlSize(.large)
-                .disabled(!model.isConnected || model.isCreatingSession)
+                .disabled(!model.acceptsUserActions || !model.isConnected || model.isCreatingSession)
             VStack(spacing: 7) {
                 Text("설정에서 OpenAI 또는 OpenAI 호환 모델 서버를 연결하세요.")
                 Text("실제 모델은 도구 권한에 따라 프로젝트 파일과 명령을 사용할 수 있습니다.")
                 SettingsLink { Label("모델 연결 설정", systemImage: "gearshape") }
             }.font(.caption).foregroundStyle(.secondary)
             if !model.isConnected {
-                Button("엔진에 다시 연결") { Task { await model.connect() } }.disabled(model.isConnecting)
+                Button("엔진에 다시 연결") { Task { await model.connect() } }.disabled(!model.acceptsUserActions || model.isConnecting)
             }
         }
         .padding(40).frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -145,7 +146,7 @@ private struct ConversationView: View {
                         if session.runs.isEmpty {
                             VStack(alignment: .leading, spacing: 10) {
                                 Text("첫 메시지를 보내 보세요").font(.title2.weight(.semibold))
-                                Text("모델과 도구 권한을 선택하세요. 이 세션은 GUI와 CLI에서 이어서 열 수 있습니다.")
+                                Text("모델과 도구 권한을 선택하세요. 세션 기록은 앱에서 이어서 볼 수 있습니다.")
                                     .foregroundStyle(.secondary)
                             }.padding(.top, 34)
                         }

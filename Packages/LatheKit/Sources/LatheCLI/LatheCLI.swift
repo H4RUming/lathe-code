@@ -16,7 +16,7 @@ private struct Arguments {
     var flags: Set<String> = []
 
     init(_ input: [String]) throws {
-        let valued: Set<String> = ["--data-dir", "--engine", "--workspace", "--session", "--request-id", "--after", "--before", "--provider", "--permission", "--max-steps", "--id", "--name", "--api", "--base-url", "--model", "--reasoning-effort", "--hash"]
+        let valued: Set<String> = ["--root", "--developer-engine", "--workspace", "--session", "--request-id", "--after", "--before", "--provider", "--permission", "--max-steps", "--id", "--name", "--api", "--base-url", "--model", "--reasoning-effort", "--hash"]
         let switches: Set<String> = ["--json", "--detach", "--follow", "--help", "--allow-http", "--key-stdin", "--clear-key"]
         words = []
         var index = 0
@@ -63,15 +63,22 @@ struct LatheCLI {
         guard let command = args.words.first, !args.flags.contains("--help") else { print(help); return 0 }
         let known: Set<String> = ["status", "sessions", "new", "show", "run", "cancel", "events", "providers", "provider-set", "tools", "tool", "approve", "deny"]
         guard known.contains(command) else { throw LatheError.invalidRequest("Unknown command: \(command)\n\(help)") }
-        let env = ProcessInfo.processInfo.environment
-        let root = args.values["--data-dir"] ?? env["LATHE_DATA_DIR"]
-        if let root, !root.hasPrefix("/") { throw LatheError.invalidRequest("--data-dir must be an absolute path.") }
+        let root = args.values["--root"]
+        if let root, !root.hasPrefix("/") || root.contains("\0") { throw LatheError.invalidRequest("--root must be an absolute path.") }
+        let engine = args.values["--developer-engine"].map { URL(fileURLWithPath: $0) }
+        if let rawEngine = args.values["--developer-engine"] {
+            guard let root, root.hasPrefix("/"), rawEngine.hasPrefix("/"), !rawEngine.contains("\0") else {
+                throw LatheError.invalidRequest("--developer-engine requires an absolute executable path and an explicit --root for the isolated test harness.")
+            }
+        }
         let paths = try EnginePaths(root: root.map { URL(fileURLWithPath: $0, isDirectory: true) })
-        let ownURL = Bundle.main.executableURL ?? URL(fileURLWithPath: CommandLine.arguments[0])
-        let engine = (args.values["--engine"] ?? env["LATHE_ENGINE_EXECUTABLE"]).map { URL(fileURLWithPath: $0) }
-            ?? ownURL.resolvingSymlinksInPath().deletingLastPathComponent().appendingPathComponent("lathe-engine")
         let client = EngineClient(paths: paths, executableURL: engine)
-        let info = try await client.connect()
+        let info: EngineInfo
+        do { info = try await client.connect() }
+        catch {
+            guard engine == nil else { throw error }
+            throw LatheError.transport("실행 중인 Lathe 앱에 연결할 수 없습니다. 앱을 먼저 실행하세요. 개발용 CLI는 별도 엔진을 자동 시작하지 않습니다.\n" + error.localizedDescription)
+        }
         try checkInterrupt(interrupted)
         let tail = Array(args.words.dropFirst())
         let json = args.flags.contains("--json")
@@ -265,7 +272,7 @@ struct LatheCLI {
     private static func stderr(_ text: String) { FileHandle.standardError.write(Data((text + "\n").utf8)) }
 
     private static let help = """
-    Lathe — native macOS coding agent preview
+    Lathe — optional developer client for the running native app
 
       lathe status [--json]
       lathe sessions [--json]
@@ -282,7 +289,10 @@ struct LatheCLI {
       lathe approve INVOCATION_ID --hash HASH
       lathe deny INVOCATION_ID --hash HASH
 
-    Global: --data-dir /absolute/path, --engine /path/to/lathe-engine
+    Default: attach to the running Lathe app; never start a background engine.
+    Global: --root /absolute/data/path (optional app data root)
+    Test harness only: --developer-engine /absolute/path/to/lathe-engine --root /absolute/test/data
+    These opt-in developer tools are not installed or included in the app distribution.
     run: --request-id UUID for an idempotent retry; --json emits NDJSON events.
     run: --provider UUID selects a saved connection; omitted selects mock.
          --permission manual|acceptEdits|plan|dontAsk (default dontAsk); --max-steps 1...24.

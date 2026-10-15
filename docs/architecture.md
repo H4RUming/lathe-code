@@ -2,8 +2,8 @@
 
 설계 기준일: 2026-10-15. 상태: **목표 아키텍처, M0 기반·M1 첫 코딩 흐름 구현**. 목표는 Swift 네이티브 macOS 앱에서 Claude Code와 동등한 작업 흐름을 제공하고 여러 모델 프로바이더를 선택하는 것이다.
 
-현재 `EngineRuntime` actor가 SQLite writer를 소유하고 SwiftUI/AppKit 앱과 CLI가 같은
-1 MiB framed JSON-RPC·cursor polling으로 세션과 실행을 공유한다. `LatheProviders`의 Responses/Chat
+현재 `Lathe.app` 프로세스 안의 `EngineHost`가 `EngineRuntime` actor·SQLite writer·모델 연결과
+도구 실행을 소유한다. 앱과 선택적인 개발 client는 1 MiB framed JSON-RPC·cursor polling으로 상태를 공유한다. `LatheProviders`의 Responses/Chat
 adapter, `LatheTools`의 broker/정책과 네 파일·명령 도구, `LatheExecution` 및 별도 `lathe-runner`,
 내용 주소 기반 blob 저장소를 연결했다. 승인·변경 전 내용·결과 참조를 effect 전에/후에 기록하고
 재시작 후 불명확한 실행을 자동 replay하지 않는다. 기본 선택은 mock이다.
@@ -24,7 +24,8 @@ adapter, `LatheTools`의 broker/정책과 네 파일·명령 도구, `LatheExecu
 - [기능 누락 점검](functional-gap-audit.md): 기준 revision 대비 보완 항목과 우선순위.
 - [구현 계획](roadmap.md): 단계별 기능/커밋/검증 게이트.
 
-첫 milestone은 전체 기능 동등성의 완료가 아니다. Skills·Hooks·MCP·서브에이전트·CLI·체크포인트·백그라운드 실행은 최종 제품의 필수 기능이다.
+첫 milestone은 전체 기능 동등성의 완료가 아니다. Skills·Hooks·MCP·서브에이전트·체크포인트와 앱 수명 안의 백그라운드 작업은 최종 제품의 필수 기능이다.
+CLI/독립 engine은 개발·검증 harness이며 별도 설치 제품이나 앱 종료 뒤의 상주 서비스가 아니다.
 공식 CLI와 Desktop도 기능 가용성이 다르므로 기준일·표면·조건을 기능별로 기록한다. 외부 서비스 기능과 실험 기능도 별도 요구사항으로 추적한다.
 같은 작업·설정 계약을 제공하더라도 선택 모델의 판단·코드 품질·성공률까지 동일하다고 보장하지 않는다.
 
@@ -36,7 +37,7 @@ adapter, `LatheTools`의 broker/정책과 네 파일·명령 도구, `LatheExecu
 | UI | SwiftUI + AppKit. 대화·설정은 SwiftUI, 긴 코드/로그/diff/PTY는 AppKit 컴포넌트 |
 | OS/언어 | macOS 15 이상 제안, Swift 6 언어 모드. 최신 SDK 빌드와 최소 OS 검증은 별도 |
 | 빌드 | Xcode 앱 target + 하나의 로컬 Swift Package |
-| 수명 | GUI와 CLI가 동일한 Swift engine에 접속. 창을 닫아도 background 작업 유지 |
+| 수명 | 앱 프로세스가 runtime 소유. 진행 중 종료는 중단/앱 유지/취소 선택, 미완료 작업 없는 마지막 창 닫기는 종료. 별도 daemon 없음 |
 | 저장 | SQLite WAL + 단일 writer actor, 출력·변경 전 내용·context는 SHA-256 blob. retention/복원은 후속 |
 | 모델 | API 어댑터·인증·capability 분리. 외부 vLLM/Ollama도 동일한 연결 모델 |
 | 추론·Ultra | provider 추론 제어와 다중 agent 실행을 분리. 로컬 모드 Off/On/Ultra는 검증된 두 축의 preset |
@@ -53,30 +54,35 @@ adapter, `LatheTools`의 broker/정책과 네 파일·명령 도구, `LatheExecu
 
 ```mermaid
 flowchart TD
-    App[Lathe.app / SwiftUI + AppKit] --> IPC[Versioned local IPC]
-    CLI[lathe CLI / headless] --> IPC
-    IPC --> Engine[LatheEngine / Swift]
-    Engine --> Runtime[Session / Run / Task orchestration]
-    Runtime --> Context[Instructions / Memory / Context]
-    Runtime --> Providers[Model adapters / Credentials]
-    Runtime --> Broker[ToolBroker / Policy / Hooks]
-    Runtime --> Journal[SQLite journal + blobs]
-    Broker --> Files[Files / Patch / Checkpoints / Git]
-    Broker --> Runner[LatheRunner / Shell / PTY / Sandbox]
+    subgraph App[Lathe.app process]
+      UI[SwiftUI + AppKit] --> IPC[Versioned local IPC]
+      IPC --> Host[EngineHost]
+      Host --> Runtime[Session / Run / Task orchestration]
+      Runtime --> Context[Instructions / Memory / Context]
+      Runtime --> Providers[Model adapters / Credentials]
+      Runtime --> Broker[ToolBroker / Policy / Hooks]
+      Runtime --> Journal[SQLite journal + blobs]
+      Broker --> Files[Files / Patch / Checkpoints / Git]
+    end
+    Dev[Optional developer client] --> IPC
+    Broker --> Runner[Bundled runner / command process]
     Broker --> Ext[MCP / LSP / Plugins / Web]
     Broker --> Remote[SSH executor]
 ```
 
-- `LatheEngine`은 사용자 단위 작업 관리자/DB writer다. 앱과 CLI가 서로 다른 세션 DB를 만들지 않는다.
-- client가 engine을 시작하고 version handshake 후 연결한다. 초기 UI 개발은 동일 interface의 in-process mock을 사용 가능하다.
-- 동시 시작은 사용자별 bootstrap lock으로 직렬화한다. 기존 socket/owner를 확인하고 살아 있는 engine에 attach하며, stale socket은 owner 종료 확인 뒤 정리한다.
-- migration도 별도 독점 lock 안에서 수행한다. 다른 버전의 engine이 실행 중이면 두 번째 writer를 만들지 않고 호환 오류를 반환한다.
-- 기본 IPC는 사용자 전용 Unix domain socket + 길이 프레이밍한 JSON-RPC 2.0이다. socket 경로 길이·runtime directory 권한·peer UID를 검증한다.
+- `EngineHost`는 앱 안에서 runtime·DB writer·IPC listener를 시작하고 종료한다. handshake PID는 앱 PID다.
+- 앱이 독점 lifetime lease를 얻은 뒤 DB를 연다. 같은 root를 소유한 다른 프로세스가 있으면 attach하지 않고 충돌로 표시한다.
+- migration도 독점 lease 아래 수행한다. stale socket은 이전 owner가 없음을 확인한 뒤 정리한다.
+- 기본 IPC는 사용자 전용 Unix domain socket + 길이 프레이밍한 JSON-RPC 2.0이다. 경로 길이·디렉터리 권한·peer UID를 검증한다.
 - 이 IPC 인증을 같은 사용자 권한의 악성 프로세스에 대한 OS 격리로 주장하지 않는다.
-- request ID, session/run ID, protocol version, last event sequence를 전달한다. 버전 불일치 시 임의 해석하지 않는다.
-- client 명령은 submit/resume/fork/steer/cancel/approve/respond/list/subscribe다. UI와 CLI가 file tool을 직접 우회 호출하지 않는다.
-- 창 닫기는 detach다. 명시적 앱 종료는 작업 중단 또는 background 유지 선택을 적용한다. headless는 기본 attach, 명시적 detach 시 조회 ID를 반환한다.
-- 스케줄을 사용하지 않으면 로그인 시 daemon을 자동 등록하지 않는다. durable 스케줄 단계에서 opt-in launch agent를 추가한다.
+- request/session/run ID, protocol version, event cursor를 전달한다. UI·개발 client는 file tool을 직접 우회 호출하지 않는다.
+- 진행 중 작업이나 미전송 입력이 있을 때 마지막 작업 창 닫기·종료는 중단 후 종료, 백그라운드 유지, 취소 중 선택한다. 미완료 작업이 없으면 바로 종료한다.
+  백그라운드에서는 앱 프로세스가 계속 실행되고 메뉴 막대에서 다시 열거나 종료한다. 별도 daemon으로 작업을 넘기지 않는다.
+- 앱 종료는 새 요청 수락을 멈추고 모델·runner를 취소/정리한 뒤 socket과 lease를 해제한다. 저장된 이력은 다음 실행에서 복원한다.
+- `Lathe.app`만 배포하며 runner는 번들 내부 실행 helper다. 로그인 agent나 시스템 CLI를 설치하지 않는다.
+  앱 삭제와 사용자 세션/Keychain 데이터 삭제를 혼동하지 않는다.
+- CLI는 opt-in 개발 빌드에서만 제공하며 기본은 실행 중인 앱에 attach한다. 독립 engine은
+  `--developer-engine /absolute/binary --root /absolute/test/data`로 명시한 테스트 harness에서만 시작한다.
 
 | Actor | 소유 상태 |
 | --- | --- |
@@ -111,16 +117,17 @@ Packages/LatheKit/
   Sources/LatheExtensions/      # compatibility, skills/hooks/MCP/plugins/LSP
   Sources/LathePersistence/     # SQLite, blobs, migration, journal
   Sources/LatheProtocol/        # IPC schemas and client
-  Sources/LatheEngine/          # executable / composition root
-  Sources/LatheCLI/             # executable / arguments and output
+  Sources/LatheEngineHost/      # app-owned runtime / IPC lifecycle
+  Sources/LatheEngine/          # opt-in standalone development harness
+  Sources/LatheCLI/             # optional developer client / arguments and output
   Sources/LatheRunner/          # executable / process supervision
   Tests/                       # fixtures and behavioral contracts
 ```
 
 이는 논리 경계다. M0에서 Domain/Runtime/Protocol과 필요한 구현부터 만들고 해당 단계에 target을 추가한다.
 Domain은 Foundation 중심의 Sendable value types/protocol만 가지며 SwiftUI·HTTP DTO·SQLite에 의존하지 않는다.
-Runtime은 Domain port를 호출하고 Engine이 구현을 주입한다. Extensions는 등록/결정만 제공하며 실행 권한을 직접 발급하지 않는다.
-App/CLI는 Protocol client에 의존한다. provider별 분기를 UI나 agent loop에 넣지 않는다.
+Runtime은 Domain port를 호출하고 앱 안의 EngineHost가 구현을 주입한다. Extensions는 등록/결정만 제공하며 실행 권한을 직접 발급하지 않는다.
+App은 EngineHost 수명과 Protocol client를 소유하며 개발 CLI는 Protocol client에 의존한다. provider별 분기를 UI나 agent loop에 넣지 않는다.
 
 ## 5. 도메인 모델
 
@@ -371,7 +378,8 @@ workflow는 fan-out/fan-in, 조건, 제한된 반복, 중간 결과를 표현한
 
 자동화는 세션 loop / 영속 local schedule / 완료 조건을 가진 goal로 구분한다.
 Schedule에 timezone/DST, sleep 중 누락, overlap(skip/queue), 만료/예산/승인 대기를 명시한다.
-local schedule은 engine이 실행 가능할 때 동작하며 컴퓨터가 꺼져 있어도 실행된다고 표시하지 않는다.
+local schedule은 Lathe 앱과 Mac이 실행 중일 때만 동작한다. 앱 종료 뒤에 별도 daemon이나 로그인 agent로
+실행하지 않으며 재시작 시 missed-run 정책을 적용한다. 컴퓨터가 꺼져 있어도 실행된다고 표시하지 않는다.
 goal은 완료 근거·중단 조건·예산·취소를 기록한다. 모델의 반복 성공 선언만으로 완료 처리하지 않는다.
 
 ## 13. 네이티브 UI 계약
@@ -411,7 +419,7 @@ IntegrationService는 검색/browser/GitHub/remote relay/cloud runner/artifact h
 
 | 게이트 | 성공 판정 |
 | --- | --- |
-| Engine/IPC | GUI+CLI 동시 시작에도 engine 하나, detach/replay, stale socket/migration lock, 버전 불일치 처리 |
+| App/IPC | 앱 PID가 runtime owner, idle/작업 중 종료 선택, runner cleanup, 재시작 복구, 개발 client 자동 spawn 금지 |
 | Process/PTY | 출력 폭주, stdin/resize, timeout, 자식 종료, 앱 재접속 |
 | Execution/Debug | profile 재현·fresh worktree setup·zero/partial test 결과, 실제 LLDB-DAP launch/attach/step/변수·종료 |
 | Sandbox | 파일/네트워크/프로세스 우회 fixture 및 실제 툴체인. 미지원 시 대안 결정 |

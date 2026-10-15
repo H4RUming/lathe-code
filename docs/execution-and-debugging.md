@@ -4,7 +4,8 @@
 [기능 명세](features.md)의 명령 실행·테스트·개발 서버·worktree·네이티브 화면을 구체화한다.
 `LAT-EXEC-001~003`, `LAT-DEBUG-001~003`과 E2E-22/23에 연결한다.
 [아키텍처](architecture.md)의 Swift engine, ExecutionEnvironment, helper runner, ToolBroker, PolicyEngine을 그대로 사용한다.
-GUI·CLI·headless·Ultra agent가 같은 실행과 디버깅 상태를 관찰하며 UI 전용 우회 실행 경로를 만들지 않는다.
+앱 UI·선택적인 개발 client·Ultra agent가 앱 내부 runtime의 실행과 디버깅 상태를 관찰하며 UI 전용 우회 경로를 만들지 않는다.
+headless 독립 실행은 명시적인 개발/CI harness다. 일반 배포는 단일 앱이며 앱 밖 상주 service를 설치하지 않는다.
 
 ## 1. 기능 동등성과 추가 네이티브 기능
 

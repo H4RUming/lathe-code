@@ -30,7 +30,7 @@ def main():
         workspace.mkdir()
         marker = workspace / "unchanged.txt"
         marker.write_text("Mock execution must preserve project files.\n")
-        command = [str(cli), "--data-dir", str(root), "--engine", str(engine)]
+        command = [str(cli), "--root", str(root), "--developer-engine", str(engine)]
         owned = set()
         socket_path = None
 

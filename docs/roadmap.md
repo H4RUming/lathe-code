@@ -1,6 +1,6 @@
 # 기능 동등성 구현·검증·커밋 계획
 
-2026-10-15 기준. **M0 실행 기반에 M1의 첫 실제 모델·도구 흐름을 연결했다. M0 기술 검증과 M1 전체는 진행 중이다.**
+2026-10-16 기준. **M0/M1의 실행 코어를 단일 macOS 앱 수명으로 통합한다. M0 기술 검증과 M1 전체는 진행 중이다.**
 현재 실행 방법과 검증 범위는 [개발 가이드](development.md)와 [첫 코딩 흐름](coding-preview.md)을 따른다. M2 이후는 목표 범위다.
 [기능 요구사항](features.md)의 LAT-* ID와 [확장 계약](extensions.md)의 X1–X9를 구현·검증에 연결한다.
 전체 구조는 [architecture.md](architecture.md), 모델 연결은 [providers.md](providers.md)를 따른다.
@@ -30,7 +30,7 @@ API key·access token·개인 프로젝트·실제 대화는 fixture/커밋에 �
 
 | 단계 | 목표 | 선행 | 대표 요구사항 | 완료 게이트 |
 | --- | --- | --- | --- | --- |
-| M0 | 실행 구조·contract·기술 검증 | 설계 | CORE/CLI/UI 기반 | GUI+CLI mock 동일 engine, IPC/DB/runner/sandbox 검증 결과 |
+| M0 | 실행 구조·contract·기술 검증 | 설계 | CORE/CLI/UI 기반 | 앱 소유 runtime·종료/복구, 개발 client attach-only, IPC/DB/runner/sandbox 검증 |
 | M1 | 실제 단일 agent coding loop·검색 | M0 | CORE, TOOL-001~012, EXEC 기반, PERM, PROVIDER-006, REASON 기반 | 코드/웹 탐색→profile 실행·테스트→설명, 승인/취소/한도 |
 | M2 | 세션·변경 관리·실행/디버거 코어 | M1 | SESSION, CTX, GIT-001~005, WORKSPACE, EXEC/DEBUG | resume/복구, 여러 root·worktree 준비, 실제 DAP·테스트 증거 |
 | M3 | 모든 provider·추론·context | M1, M2 | PROVIDER 전체, REASON-001/002/006/007 단일 agent, TOOL-013~014 | tool/비텍스트 왕복·native 옵션·Off/On·context/프로필 갱신 |
@@ -48,10 +48,12 @@ M0~M6는 로컬 코딩 에이전트와 네이티브 사용 흐름의 완성 범�
 
 ### M0 — 실행 기반
 
-첫 구현 범위: SwiftUI/AppKit 앱·공통 client·별도 engine·CLI, versioned Unix IPC,
+현재 배포 범위: SwiftUI/AppKit 단일 앱·내장 runtime/EngineHost·runner, versioned Unix IPC,
 SQLite WAL journal, mock 스트리밍·취소·재접속·crash recovery, package tests와 macOS CI 정의.
 이벤트 전달은 cursor 기반 polling이며 persistent subscription은 후속이다.
 runner/pipe/PTY·원래 process group 취소와 helper intent/result journal을 추가했다.
+기존 standalone engine/CLI는 opt-in 개발 harness로 제한하고 기본 빌드·배포는 앱 하나로 변경한다.
+앱은 작업 중 종료 선택과 미완료 작업이 없는 마지막 창 닫기의 종료를 소유하며 로그인 agent·시스템 CLI를 설치하지 않는다.
 sandbox fixture probe는 host에서 통과했지만 production backend는 아니다.
 LLDB-DAP 발견·initialize는 성공했고 실제 launch/attach는 host timeout으로 미완료다.
 일반 blob store와 engine ToolInvocation 승인·실행 기록을 첫 coding loop에 연결했다.
@@ -60,20 +62,21 @@ sandbox 적용 backend, PTY renderer 결정과 debugger 실행 게이트는 남�
 
 - Xcode 앱·로컬 Package·Swift 6 설정, 최소 UI/mock provider, macOS CI build.
 - Domain IDs/events/tool schemas, versioned IPC command/event 계약.
-- Swift engine startup/attach/detach, GUI/CLI 공통 client, event subscription/replay.
+- 앱 내부 EngineHost startup/stop, 개발 client attach-only, event subscription/replay.
 - SQLite writer·migration·blob store의 최소 구현. **side-effect tool보다 journal을 먼저** 만든다.
 - runner process/pipe/PTY·child cancellation spike, sandbox filesystem/network probe.
 - LLDB-DAP 발견·기본 handshake/launch/attach spike, 실제 Swift toolchain·OS 권한·debug info 요구 확인.
 - 결정 기록: SQLite wrapper, PTY renderer, sandbox backend, deployment target 실제 검증 범위.
 
-게이트: GUI+CLI 동시 시작에도 engine이 하나이며 bootstrap/migration lock과 stale socket 복구가 동작한다.
-GUI 창을 닫고 CLI로 다시 연결해 동일 mock 작업을 확인한다. 새 client가 중복 실행을 시작하지 않는다.
+게이트: 앱 PID가 runtime owner이며 같은 root의 두 번째 owner를 거절한다. migration lease와 stale socket 복구가 동작한다.
+idle 창 닫기/종료는 프로세스·socket을 정리하고, 작업 중에는 중단 후 종료/앱 유지/취소를 검증한다.
+기본 개발 client는 앱 없이 daemon을 시작하지 않는다. 강제 종료 뒤 불명확한 실행을 replay하지 않는다.
 검증되지 않은 sandbox/PTY 조합은 분명하게 남기고 필요한 대안을 결정한다.
 
 ### M1 — 공통 coding loop
 
 **구현된 첫 묶음:** Responses/Chat 스트리밍 adapter, 네이티브 연결 설정과 endpoint에 묶인 Keychain 키,
-GUI/CLI 공통 loop, Manual/Accept edits/Plan/Don't ask, 정확한 요청 hash에 대한 일회 승인,
+앱 runtime과 개발 client의 공통 loop, Manual/Accept edits/Plan/Don't ask, 정확한 요청 hash에 대한 일회 승인,
 list/read/write/run_command, SHA precondition과 변경 전/결과 blob, 비대화형 native runner,
 취소·불명확한 실행 복구·자동 replay 금지. 최대 단계·호출 수 등 기본 한도를 적용한다.
 기본 앱은 mock이며 저장된 연결을 선택해야 실제 도구가 동작한다.
@@ -181,7 +184,7 @@ E2E-18과 추론 계약 전체를 통과한다. 동일 local 모델 Ultra와 명
 - loop/goal/durable local schedule, timezone/DST·sleep·overlap·승인 대기·예산.
 - X7: plugin monitors/styles/themes 및 지원 가능한 mods bridge.
 
-게이트: GUI/CLI가 동일한 작업과 상태를 보고, 장기 서버·schedule·agent를 각각 중지할 수 있다.
+게이트: 앱과 선택적인 개발 client가 동일한 작업과 상태를 보고, 장기 서버·schedule·agent를 각각 중지할 수 있다.
 로컬 스케줄은 machine-off 실행을 약속하지 않는다. preview 표시와 browser 자동화를 구분한다.
 
 ### M7 — 원격·서비스 영역
@@ -228,7 +231,7 @@ Claude와 Lathe 차등 검증은 사용자 동작·설정 계약을 비교하며
 
 ## 5. 다음 구현 단위
 
-Swift 앱/engine/CLI에 실제 Responses/Chat adapter와 도구 승인·파일·명령·blob·실행 기록을 연결했다.
+Swift 앱의 runtime에 실제 Responses/Chat adapter와 도구 승인·파일·명령·blob·실행 기록을 연결했다.
 다음은 M1의 코드/웹 검색, patch·변경 미리보기, 실행 profile과 테스트 증거, 예산·모델 capability다.
 LLDB launch/attach timeout은 별도 미완료 게이트로 남기며 debugger 제품 연결 전에 해결한다.
 sandbox probe 통과를 production 격리 완료로 확대하지 않는다.

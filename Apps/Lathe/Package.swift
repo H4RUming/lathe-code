@@ -12,6 +12,7 @@ let package = Package(
             dependencies: [
                 .product(name: "LatheDomain", package: "LatheKit"),
                 .product(name: "LatheProtocol", package: "LatheKit"),
+                .product(name: "LatheEngineHost", package: "LatheKit"),
             ],
             path: "Sources",
             exclude: ["LatheApp.swift", "WorkspaceView.swift", "EngineSettingsView.swift"]

@@ -10,6 +10,7 @@ let package = Package(
         .library(name: "LatheExecution", targets: ["LatheExecution"]),
         .library(name: "LatheProviders", targets: ["LatheProviders"]),
         .library(name: "LatheTools", targets: ["LatheTools"]),
+        .library(name: "LatheEngineHost", targets: ["LatheEngineHost"]),
         .executable(name: "lathe-runner", targets: ["LatheRunner"]),
         .executable(name: "lathe-engine", targets: ["LatheEngine"]),
         .executable(name: "lathe", targets: ["LatheCLI"]),
@@ -25,8 +26,9 @@ let package = Package(
         .executableTarget(name: "LatheRunner", dependencies: ["LatheExecution"]),
         .target(name: "LathePersistence", dependencies: ["LatheDomain", "CSQLite"]),
         .target(name: "LatheRuntime", dependencies: ["LatheDomain", "LathePersistence", "LatheProviders", "LatheTools"]),
-        .executableTarget(name: "LatheEngine", dependencies: ["LatheDomain", "LatheProtocol", "LatheRuntime"]),
+        .target(name: "LatheEngineHost", dependencies: ["LatheDomain", "LatheProtocol", "LatheRuntime", "LatheProviders"]),
+        .executableTarget(name: "LatheEngine", dependencies: ["LatheDomain", "LatheProtocol", "LatheEngineHost"]),
         .executableTarget(name: "LatheCLI", dependencies: ["LatheDomain", "LatheProtocol"]),
-        .testTarget(name: "LatheKitTests", dependencies: ["LatheDomain", "LatheProtocol", "LatheRuntime", "LathePersistence", "LatheExecution", "LatheProviders", "LatheTools"]),
+        .testTarget(name: "LatheKitTests", dependencies: ["LatheDomain", "LatheProtocol", "LatheRuntime", "LathePersistence", "LatheExecution", "LatheProviders", "LatheTools", "LatheEngineHost"]),
     ]
 )

@@ -10,7 +10,7 @@ Claude Code도 공식 MCP 문서에서 서버 제작 skill과 HTTP/stdio scaffol
 ## 1. 하나의 도구 카탈로그와 실행 계약
 
 Tools 모듈의 `ToolRegistry`는 built-in, MCP, integration 도구를 동일한 descriptor로 관리한다.
-GUI·CLI·main agent·subagent는 같은 registry snapshot을 사용하고, 실행은 모두 `ToolBroker`를 통과한다.
+앱 GUI·선택적인 개발 CLI·main agent·subagent는 앱 내부의 같은 registry snapshot을 사용하고, 실행은 모두 `ToolBroker`를 통과한다. 일반 배포는 앱 하나이며 개발 CLI를 별도로 설치하지 않는다.
 
 | 필드 | 계약 |
 | --- | --- |

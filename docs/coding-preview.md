@@ -1,7 +1,7 @@
 # M1 첫 코딩 흐름
 
-2026-10-15. 앱과 CLI가 같은 엔진에서 **실제 모델 요청 → 도구 승인 → 파일/명령 실행 → 결과 전달**을
-수행하는 첫 구현이다. M1 전체나 Claude Code 기능 동등성의 완료를 뜻하지 않는다.
+2026-10-16. 하나의 Lathe 앱 내부 runtime이 **실제 모델 요청 → 도구 승인 → 파일/명령 실행 → 결과 전달**을
+수행하는 첫 구현이다. 별도 상주 engine이나 시스템 CLI를 설치하지 않는다. M1 전체나 Claude Code 기능 동등성의 완료를 뜻하지 않는다.
 기본 선택은 여전히 mock이며 저장한 모델 연결을 선택한 실행만 외부 API와 실제 도구를 사용한다.
 
 ## 모델 연결
@@ -57,8 +57,10 @@ Chat 서버가 반환하는 `reasoning` 및 이전 형식 `reasoning_content`는
 명시하고 부모 API 키를 상속하지 않는다. 개발 도구별 환경 profile, 사용자 PATH 선택, 대화형 터미널은 후속이다.
 낮은 수준의 runner는 PTY를 지원하지만 현재 모델 도구와 앱에는 PTY 화면·입력 세션이 연결되어 있지 않다.
 
-## CLI
+## 개발 client
 
+일반 배포는 `Lathe.app` 하나다. 아래 CLI는 `Scripts/build-app.sh --developer-tools`로 추가 빌드한
+개발 도구이며 실행 중인 앱에만 연결한다. 앱이 없으면 자동 daemon 생성 없이 연결 오류로 끝난다.
 연결을 저장하면 반환된 UUID로 실행한다. 실제 서버에 맞는 모델 ID를 넣는다.
 
 ```sh
@@ -78,6 +80,9 @@ Chat 서버가 반환하는 `reasoning` 및 이전 형식 `reasoning_content`는
 `--key-stdin`으로 pipe된 stdin에서 받는다. 키를 명령 인자에 넣는 옵션은 없다.
 `--clear-key`는 해당 연결의 키를 삭제한다. Base URL에 사용자명·암호·query를 넣을 수 없다.
 
+독립 CI fixture만 `--developer-engine /absolute/lathe-engine --root /absolute/test-data`를 함께 지정해
+테스트 engine을 시작한다. 기본 client와 앱에는 이 모드를 사용하지 않는다.
+
 `run --provider`를 생략하면 mock이다. 실제 모델의 headless 기본 권한은 `dontAsk`이며 승인 입력을
 기다리지 않는다. `manual`과 `acceptEdits`는 `--detach`가 필요하고 앱 또는 별도의 `approve/deny`
 명령으로 결정한다. `tools`는 프레임 한도 때문에 최근 네 호출만 반환하며 `tool ID`로 개별 조회한다.
@@ -89,6 +94,9 @@ SQLite는 승인·실행 상태를 기록한다. 파일 변경 전 blob을 저�
 blob은 SHA-256 주소로 저장하며 읽을 때 digest를 확인한다. 화면은 결과 일부를 표시하고 전체 raw 출력과
 변경 전 blob을 내려받거나 복원하는 UI는 아직 없다. 저장 정책·자동 삭제·checkpoint 복원도 후속이다.
 
+runtime과 DB는 앱 프로세스가 소유한다. 진행 중 작업이나 미전송 입력이 있을 때 마지막 작업 창 닫기·종료는
+중단 후 종료/백그라운드 유지/취소를 선택한다. 미완료 작업이 없으면 바로 종료한다. 백그라운드에서는
+메뉴 막대에서 앱을 다시 열거나 종료한다. 앱을 유지한다는 선택 없이 별도 engine만 남기지 않는다.
 사용자 취소는 모델 HTTP와 실행 helper로 전달한다. 유효한 성공 receipt가 이미 있으면 늦은 취소 때문에
 그 효과를 미실행으로 바꾸지 않는다. 엔진 재시작 시 대기/승인된 호출은 `cancelled`, 실행 중 호출은
 `unknown`, 진행 중 run은 `interrupted`로 복구한다. 모델 요청과 도구를 자동 재실행하지 않는다.

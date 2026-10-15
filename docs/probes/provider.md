@@ -4,9 +4,12 @@
 `Scripts/probe-provider.py`의 6개 검사가 통과했다. 실제 URLSession → engine → CLI → native runner를 사용했다.
 서버 주소, 인증 정보, 실제 세션 transcript는 저장소에 넣지 않는다.
 
+검사에는 `Scripts/build-app.sh --developer-tools`로 추가 빌드한 독립 개발 harness를 사용한다.
+일반 배포 앱은 같은 실행 코어를 앱 프로세스 안에서 소유하며 별도 엔진을 설치하지 않는다.
+
 ## 확인한 동작
 
-- 새 임시 데이터와 workspace를 사용하는 별도 엔진에 연결한다.
+- 새 임시 데이터와 workspace를 사용하는 개발 전용 엔진에 연결한다.
 - 모델이 합성 `source.txt`를 읽고 SHA-256을 얻는다.
 - `add` 함수의 뺄셈을 덧셈으로 고치는 정확한 내용만 일회 승인한다.
 - 수정 완료 후 고정 `/usr/bin/printf` 인자만 일회 승인한다.

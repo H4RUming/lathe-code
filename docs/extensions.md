@@ -25,8 +25,9 @@ Claude Code와 동등한 제품으로 부르지 않는다. 다만 모델 응답�
 대조하지 않았으므로 특정 CLI 버전에 대한 E 인증은 없다. 구현 시 테스트한 CLI 버전과
 스키마 revision을 고정하고, 그 밖의 신규 필드는 U로 표시한다.
 
-확장 로딩과 실행은 **별도 Swift engine 프로세스의 Extensions 모듈**이 소유한다. macOS GUI와
-CLI는 local IPC로 같은 registry·진단·승인·실행 상태를 사용한다. Extensions는 Runtime,
+확장 로딩과 실행은 **앱 내부 Swift runtime의 Extensions 모듈**이 소유한다. macOS GUI와
+선택적으로 빌드한 개발 CLI는 local IPC로 앱 내부의 같은 registry·진단·승인·실행 상태를 사용한다.
+개발 CLI는 별도 설치 제품이나 앱 종료 뒤의 상주 서비스가 아니다. Extensions는 Runtime,
 Policy, Context, Tools, Providers, Persistence의 계약을 이용하고 독자적인 실행 우회 경로를 만들지 않는다.
 hook·skill 전처리·MCP·subagent·workflow가 요청한 도구도 동일한 `ToolBroker`로 들어가며,
 실제 shell/PTY는 helper runner가 담당한다. Claude SDK나 TypeScript wrapper를 핵심 엔진으로 요구하지 않는다.

@@ -60,7 +60,7 @@ struct EngineSettingsView: View {
                     Spacer()
                     Button("새 연결") { editingID = nil; newProfileID = UUID(); loadSelection() }
                     Button("저장") { save() }.buttonStyle(.borderedProminent)
-                        .disabled(!model.isConnected || model.isSavingProfile || name.isEmpty || modelName.isEmpty)
+                        .disabled(!model.acceptsUserActions || !model.isConnected || model.isSavingProfile || name.isEmpty || modelName.isEmpty)
                 }
                 if model.isSavingProfile { ProgressView("연결을 저장하는 중…") }
                 Text("vLLM·Ollama·개인 서버는 OpenAI 호환 API 주소를 사용하세요. 모델 서버 주소와 로컬 코드 실행 위치는 별개입니다.")
@@ -80,14 +80,14 @@ struct EngineSettingsView: View {
                     LabeledContent("프로세스", value: String(info.processID))
                     LabeledContent("프로토콜", value: String(info.protocolVersion))
                 }
-                Button("엔진에 다시 연결") { Task { await model.connect() } }.disabled(model.isConnecting)
+                Button("엔진에 다시 연결") { Task { await model.connect() } }.disabled(!model.acceptsUserActions || model.isConnecting)
             }
             Section("로컬 데이터") {
                 if let directory = model.dataDirectory {
                     Text(directory.path).font(.caption.monospaced()).textSelection(.enabled)
                     Button("Finder에서 보기") { NSWorkspace.shared.open(directory) }
                 }
-                Text("세션·도구 승인·실행 결과는 로컬에 보관됩니다. 창이나 앱을 닫아도 별도 엔진의 실행은 계속됩니다. 중단 버튼으로 실행을 취소하세요.")
+                Text("세션·도구 승인·실행 결과는 로컬에 보관됩니다. 엔진은 이 앱 안에서 실행되며 앱 종료 시 함께 중단됩니다. 작업 중 창을 닫으면 종료·백그라운드 유지·취소를 선택할 수 있습니다.")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }.formStyle(.grouped)

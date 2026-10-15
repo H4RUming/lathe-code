@@ -196,7 +196,7 @@ def main():
             base = Path(temporary).resolve()
             root, projects = base / "state", base / "projects"
             projects.mkdir()
-            cli_command = [str(cli), "--data-dir", str(root), "--engine", str(engine)]
+            cli_command = [str(cli), "--root", str(root), "--developer-engine", str(engine)]
             owned_pid = None
             socket_path = None
             active_runs = set()

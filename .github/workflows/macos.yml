@@ -31,8 +31,14 @@ jobs:
         run: swift test --package-path Packages/LatheKit --scratch-path .build/ci-tests
       - name: Native app state regression tests
         run: swift test --package-path Apps/Lathe --scratch-path .build/ci-app-tests
-      - name: Build native app and CLI
-        run: Scripts/build-app.sh
+      - name: Build native app and opt-in test tools
+        run: Scripts/build-app.sh --developer-tools
+      - name: Verify single app distribution
+        run: |
+          test -x .build/macos/Lathe.app/Contents/Helpers/lathe-runner
+          test ! -e .build/macos/Lathe.app/Contents/Helpers/lathe-engine
+      - name: Native app ownership and lifecycle smoke
+        run: python3 Scripts/smoke-app.py --bin-dir .build/macos --output .build/probes/app-lifecycle.json
       - name: Engine and CLI integration smoke
         run: python3 Scripts/smoke-engine.py --bin-dir .build/macos
       - name: Runner integration smoke
@@ -55,17 +61,14 @@ jobs:
           path: |
             .build/probes/sandbox.json
             .build/probes/agent.json
+            .build/probes/app-lifecycle.json
           if-no-files-found: ignore
       - name: Package development app
         run: ditto -c -k --sequesterRsrc --keepParent .build/macos/Lathe.app .build/macos/Lathe.app.zip
       - uses: actions/upload-artifact@v4
         with:
           name: Lathe-macOS-development
-          path: |
-            .build/macos/Lathe.app.zip
-            .build/macos/lathe
-            .build/macos/lathe-engine
-            .build/macos/lathe-runner
+          path: .build/macos/Lathe.app.zip
           if-no-files-found: error
   debugger-probe:
     if: github.event_name == 'workflow_dispatch' && inputs.debugger_probe

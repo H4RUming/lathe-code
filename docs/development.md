@@ -1,13 +1,14 @@
 # 개발·실행 가이드
 
-2026-10-15. **M0 실행 기반과 M1의 첫 코딩 흐름 구현**. M1 전체와 기능 동등성은 미완료다.
+2026-10-16. **단일 앱 수명으로 통합한 M0 실행 기반과 M1의 첫 코딩 흐름 구현**. M1 전체와 기능 동등성은 미완료다.
 사용 가능한 모델·권한·도구 계약은 [첫 코딩 흐름](coding-preview.md), 목표와 남은 순서는
 [features.md](features.md)와 [roadmap.md](roadmap.md)를 따른다.
 
 ## 현재 제공하는 흐름
 
 프로젝트 선택 → 모델 연결·권한 선택 → 스트리밍 → 도구 승인·실행 → 결과 전달 → 완료/취소·재접속.
-SwiftUI/AppKit 앱과 CLI가 같은 Swift engine, SQLite와 blob 저장소를 사용한다.
+SwiftUI/AppKit 앱 프로세스 안의 EngineHost가 runtime, SQLite와 blob 저장소를 소유한다.
+개발용 CLI는 실행 중인 앱에 연결하는 선택 도구이며 일반 배포/설치 구성 요소가 아니다.
 기본 mock은 외부 API나 파일 도구를 호출하지 않는다. 실제 연결을 고르면 Responses 또는 Chat API와
 list/read/write/run_command를 사용한다. Google·Claude 전용 adapter, 검색·MCP·Ultra·편집기·디버거는 후속이다.
 프로젝트를 선택하는 것만으로 파일 수집이나 스크립트 실행을 시작하지 않는다.
@@ -16,7 +17,7 @@ list/read/write/run_command를 사용한다. Google·Claude 전용 adapter, 검�
 | --- | --- | --- |
 | LAT-CORE-001/002/006 | 실제 단일 모델/tool loop, 스트림·취소·재접속 | steering·retry·질문·context 관리 확대 |
 | SESSION 계열 | 세션/run/event, context blob, 중복 submit 방지·복구 | fork/rewind/archive/export·실패한 작업 재개 |
-| UI/CLI 계열 | 네이티브 연결 설정·Keychain 입력·승인 카드·CLI 공통 연결 | 편집기/PTY/diff/전체 결과 조회·접근성 검증 확대 |
+| UI/CLI 계열 | 네이티브 연결 설정·Keychain 입력·승인 카드·개발 client 공통 연결 | 편집기/PTY/diff/전체 결과 조회·접근성 검증 확대 |
 | TOOL/EXEC/PERM 기반 | 네 도구·SHA 사전조건·일회 승인·runner journal | 검색·풍부한 편집·실행 profile·production 격리·background |
 
 일부 구현은 각 LAT 요구사항의 전체 수용 기준 통과를 뜻하지 않는다.
@@ -32,27 +33,38 @@ Scripts/build-app.sh
 open .build/macos/Lathe.app
 ```
 
-출력은 현재 host 아키텍처용 `.build/macos/Lathe.app`, `lathe`, `lathe-engine`, `lathe-runner`다.
-앱에는 `Contents/Helpers/lathe-engine`과 `lathe-runner`가 내장된다.
+기본 출력은 현재 host 아키텍처용 **`.build/macos/Lathe.app` 하나**다.
+앱에는 실행에 필요한 `Contents/Helpers/lathe-runner`만 내장한다. runtime과 DB writer는 앱 안에서 실행한다.
+독립 `lathe-engine`, CLI, 로그인 agent를 사용자 시스템에 설치하지 않는다.
 `--configuration release`, `--output`, `--scratch-path`, `--derived-data-path`를 지정할 수 있다.
 개발용 ad-hoc 서명이며 Developer ID 서명·공증·universal 배포는 후속이다.
 
 Xcode에서는 `Apps/Lathe/Lathe.xcodeproj`의 **Lathe** scheme을 **My Mac**으로 실행한다.
-앱 target build phase가 engine/runner를 SwiftPM으로 빌드해 내장하므로 수동 복사가 필요 없다.
-코어만 준비하려면 다음을 사용한다. 최초 `swift build`는 CLI와 engine/helper를 함께 준비한다.
+앱 target은 EngineHost library를 link하고 build phase는 runner만 내장한다.
+CLI와 독립 테스트 engine이 필요할 때만 개발 도구를 추가 빌드한다.
 
 ```sh
-swift build --package-path Packages/LatheKit
-swift run --package-path Packages/LatheKit lathe --help
+Scripts/build-app.sh --developer-tools
+swift test --package-path Packages/LatheKit
 ```
 
-## 앱과 CLI 사용
+opt-in 출력에는 `lathe`, `lathe-engine`, `lathe-runner`가 추가된다. 이 파일들은 개발 디렉터리에만
+생성하며 PATH·로그인 항목·시스템 서비스에 등록하지 않는다. 다시 기본 빌드를 하면 해당 출력 디렉터리의
+이전 standalone 실행 파일을 제거한다. CI는 검증용 도구를 빌드하되 배포 artifact에는 앱 ZIP만 담는다.
+
+## 앱과 개발 client 사용
 
 앱에서 **프로젝트 열기**로 폴더를 고른다. `⌘,`의 **모델 연결**에서 profile을 저장하고 작성창에서
 선택한다. 새 실행에 적용할 권한도 작성창에서 고른다. `⌘↩` 전송, `⌘.` 중단, 여러 줄 입력을 지원한다.
 최신 run 네 개를 먼저 표시하고 **이전 대화 불러오기**로 이력을 조회한다.
 도구 카드에는 정확한 요청 인자·실행 상태·결과 일부와 일회 승인/거절을 표시한다.
-창이나 앱을 닫아도 엔진과 작업은 유지되며 명시적인 중단 명령으로 취소한다.
+진행 중 작업이나 미전송 입력이 있을 때 마지막 작업 창 닫기·종료에서는
+**중단 후 종료 / 백그라운드 유지 / 취소**를 선택한다. 미완료 작업이 없으면 바로 종료한다.
+백그라운드 유지에서는 앱 프로세스가 계속 실행되며 메뉴 막대에서 다시 열거나 종료할 수 있다. 별도 daemon으로 옮기지 않는다.
+정상 종료는 HTTP와 runner 정리 및 socket 해제까지 기다린다.
+
+아래 명령은 opt-in 개발 도구를 빌드하고 Lathe 앱을 실행한 상태에서 사용한다. 기본 client는 앱이 없으면
+연결 오류로 끝나며 독립 engine을 자동 시작하지 않는다.
 
 ```sh
 .build/macos/lathe status --json
@@ -64,7 +76,7 @@ swift run --package-path Packages/LatheKit lathe --help
 ```
 
 실제 모델 설정과 `provider-set`, `tools`, `tool`, `approve/deny --hash` 예시는
-[첫 코딩 흐름](coding-preview.md#cli)을 따른다. CLI에서 `--provider`를 생략하면 mock이고,
+[첫 코딩 흐름](coding-preview.md#개발-client)을 따른다. CLI에서 `--provider`를 생략하면 mock이고,
 실제 모델의 기본 권한은 `dontAsk`다. 승인 모드 `manual/acceptEdits`는 `--detach`가 필요하다.
 
 - `run --detach`는 접수된 run JSON을 반환한다. `cancel RUN_UUID`로 중단한다.
@@ -81,33 +93,44 @@ swift run --package-path Packages/LatheKit lathe --help
 
 ## 프로세스·저장 경계
 
-기본 데이터 경로는 `~/Library/Application Support/Lathe`다. `LATHE_DATA_DIR` 또는 CLI
-`--data-dir /absolute/path`는 별도 엔진/DB를 선택한다. 엔진은 CLI `--engine` 또는
-`LATHE_ENGINE_EXECUTABLE`로 지정하며 기본은 CLI 옆 파일이다. 앱은 내장 helper를 쓴다.
+기본 데이터 경로는 `~/Library/Application Support/Lathe`다. 격리된 앱 검증은 앱 프로세스의
+`LATHE_DATA_DIR`를 지정한다. 개발 client의 `--root /absolute/path`는 그 앱 데이터 root에 연결한다.
+client는 `LATHE_ENGINE_EXECUTABLE`이나 이웃 실행 파일을 발견했다고 engine을 시작하지 않는다.
 
 ```text
-SwiftUI/AppKit ─┐
-               ├─ EngineClient ─ Unix socket ─ EngineRuntime actor ─ SQLite + blobs
-lathe CLI ─────┘                              ├─ ModelClient ─ Responses / Chat HTTP
-                                             └─ ToolBroker / Policy ─ files / native runner
+Lathe.app process: SwiftUI/AppKit → EngineClient → EngineHost / IPC → EngineRuntime
+                                                                 ├─ SQLite + blobs
+optional dev client ──────────────── local IPC ────────────────────┤
+                                                                 ├─ ModelClient / HTTP
+                                                                 └─ ToolBroker → bundled runner
 ```
 
-- bootstrap/lifetime flock으로 data root별 engine과 DB writer를 단일화한다.
-- 데이터/소켓 디렉터리는 0700으로 원자적으로 생성하고 기존 owner/type/mode를 검사한다.
-- Unix socket은 root hash로 만든 짧은 사용자 임시 경로에 두며 0600과 peer UID를 검사한다.
-- 독점 lease를 획득한 뒤 연결할 수 없는 stale socket만 정리한다. live socket을 임의 삭제하지 않는다.
-- 엔진은 별도 process session으로 시작한다. 시작 오류는 0600 `startup.log`에 남긴다.
+- 앱 내부 EngineHost가 data root의 독점 lease를 얻은 뒤 runtime과 DB를 연다. handshake PID는 앱 PID다.
+- 같은 root를 이미 소유한 프로세스가 있으면 앱은 충돌을 표시한다. 다른 standalone engine에 몰래 attach하지 않는다.
+- 데이터/소켓 디렉터리는 0700으로 원자적으로 생성하고 owner/type/mode를 검사한다.
+- Unix socket은 root hash로 만든 사용자 임시 경로에 두며 0600과 peer UID를 검사한다.
+  stale socket은 독점 lease 아래에서만 정리한다.
+- 종료 시 새 요청 수락을 멈추고 HTTP·runner를 취소/정리한 뒤 socket·lease를 해제한다.
 - profile 메타데이터는 SQLite, 키는 profile ID+Base URL에 묶인 Keychain 항목에 저장한다.
-  설정 화면의 키는 다시 읽어 표시하지 않는다. API 키를 실행 환경에 자동 상속하지 않는다.
+  저장된 키는 화면에 다시 표시하거나 실행 환경에 자동 상속하지 않는다.
 - 변경 전 내용·결과·model context는 SHA-256 blob으로 저장한다. `beforeBlobID`와 결과 `blobID`를 구분한다.
-- 실행 전 tool state와 runner intent를 durable 기록한다. 재시작 시 대기/승인은 취소하고 실행 중 효과는
-  `unknown`으로 남긴다. 진행 중 run은 `interrupted`이며 모델/도구를 자동 재실행하지 않는다.
-- runner process group 정리는 OS sandbox가 아니다. 명시적으로 승인한 명령은 사용자 권한으로 실행한다.
+- 실행 전 상태와 runner intent를 durable 기록한다. 재시작 시 대기/승인은 취소하고 실행 중 효과는
+  `unknown`, 진행 중 run은 `interrupted`로 남기며 모델/도구를 자동 재실행하지 않는다.
+- runner의 process group 정리는 OS sandbox가 아니다. 승인된 명령은 사용자 권한으로 실행한다.
+- 앱 bundle을 삭제하면 포함된 실행 파일도 제거된다. Application Support의 세션·설정과 Keychain 항목은
+  사용자 데이터로 남을 수 있다. 데이터 잔존을 실행 중인 engine이나 설치된 서비스로 표현하지 않는다.
 
-빌드로 이미 실행 중인 엔진이 교체되지는 않는다. 현재 IPC는 **v2**, DB schema는 **v2**이며
-v1 DB를 migration한다. 이전 엔진과 연결하면 버전 오류와 PID를 확인한 뒤 작업을 정리하고 해당 엔진을
-`kill -TERM PID`로 종료해 다시 연결한다. client가 구버전 엔진을 자동 종료하지 않는다.
-DB migration 후 구버전 바이너리로 되돌려 여는 동작은 지원하지 않는다.
+독립 engine은 앱 없는 CI fixture를 위한 개발 harness로만 남긴다. 실행 파일과 격리 root를 모두 명시한다.
+
+```sh
+.build/macos/lathe --developer-engine "$PWD/.build/macos/lathe-engine" \
+  --root /absolute/test-data status --json
+```
+
+이 모드의 독립 프로세스는 probe가 소유·정리한다. 일반 앱이나 기본 CLI 경로에는 적용하지 않는다.
+현재 IPC/DB schema는 v2이며 v1 DB를 migration한다. 과거 개발 빌드의 standalone engine이 이미 해당
+root를 소유하면 새 앱은 시작 충돌을 표시한다. 그 테스트 프로세스를 확인해 종료한 뒤 앱을 다시 연다.
+앱 교체 빌드가 현재 앱이나 예전 프로세스를 자동으로 죽이지 않으며 구버전 DB downgrade는 지원하지 않는다.
 
 ## 구현 계약
 
@@ -119,7 +142,8 @@ DB migration 후 구버전 바이너리로 되돌려 여는 동작은 지원하�
 | LatheProviders | Responses/Chat codec·SSE·HTTP 취소/한도·credential port와 Keychain |
 | LatheTools | 도구 schema·정책·경로/SHA 검사·runner bridge |
 | LatheRuntime | actor·mock/실제 loop·승인·write lease·context·복구 |
-| LatheEngine / LatheCLI | 별도 엔진과 RPC dispatch / headless 입력·조회·승인·SIGINT |
+| LatheEngineHost | 앱 내부 runtime·RPC listener·lease·종료 수명 |
+| LatheEngine / LatheCLI | opt-in 독립 테스트 harness / 실행 중 앱에 attach하는 개발 client |
 | LatheExecution / CLatheExecution | Swift 실행 수명·byte stream·입력/한도·POSIX spawn/PTY |
 | LatheRunner | helper·NDJSON 제어·fsync intent/events/result journal |
 | Apps/Lathe | SwiftUI/AppKit presentation·profile 설정·대화·승인·재연결 |
@@ -143,7 +167,8 @@ context는 바로 앞 완료 run의 동일 profile snapshot만 이어간다. 실
 ```sh
 swift test --package-path Packages/LatheKit
 swift test --package-path Apps/Lathe
-Scripts/build-app.sh
+Scripts/build-app.sh --developer-tools
+python3 Scripts/smoke-app.py --bin-dir .build/macos --output .build/probes/app-lifecycle.json
 LATHE_TEST_RUNNER="$PWD/.build/macos/lathe-runner" swift test --package-path Packages/LatheKit --filter ToolTests
 python3 Scripts/smoke-engine.py --bin-dir .build/macos
 python3 Scripts/smoke-runner.py --runner .build/macos/lathe-runner
@@ -174,12 +199,17 @@ HTTPS에서는 `--allow-http`를 생략한다. probe는 최대 180초·8 model s
 - Chat의 `reasoning`과 이전 `reasoning_content`는 원래 필드명을 유지해 다음 도구 왕복에 전달한다.
   두 필드 합산 UTF-8 1 MiB 한도와 잘못된 타입 거절을 검사한다.
 - tool 테스트는 경로·SHA·권한·승인 지연 뒤 cwd 교체·raw byte·timeout·취소·receipt 누락과 journal 재사용 금지를 검사한다.
-- 실제 HTTP 통합 fixture의 9개 검사가 로컬에서 통과했다. 공통 engine/CLI/runner를 통해
+- 기존 실제 HTTP 통합 fixture의 9개 검사가 로컬에서 통과했다. 개발 harness의 같은 runtime/CLI/runner를 통해
   read→승인된 write→승인된 shell→최종 응답, hash 불일치·중복 요청, Plan/dontAsk/거절,
   중간 EOF, 대기·shell·HTTP 취소, Responses reasoning replay, HTTP 307 redirect 거절을 확인했다.
 - 별도 live probe는 원격 vLLM 0.27.1의 Qwen 계열 모델 한 구성에서 6개 검사를 통과했다.
   [실제 서버 검사](probes/provider.md)는 합성 파일 편집과 고정 명령 왕복까지이며 다른 구성, OpenAI 계정과 Ollama는 미검증이다.
   Keychain 구현과 메모리 credential fixture 검증도 실제 사용자 키로 API를 호출한 검증과 구분한다.
+- `smoke-app.py`는 실제 앱 PID와 runtime PID 일치, idle 종료·socket 해제, 강제 종료 뒤 runner 정리·재시작 복구,
+  앱 없는 기본 CLI의 자동 spawn 금지를 검사한다. 기존 사용자 앱과 충돌하지 않도록 임시 복사본에 고유 bundle ID와
+  ad-hoc 서명을 적용한다. 2026-10-16 로컬 macOS 27에서 네 검사가 통과했다.
+- 같은 로컬 환경에서 코어 78개(실제 runner 종료 포함)와 앱 모델 18개 테스트가 통과했다.
+  네이티브 창 닫기·⌘Q 경고, 취소 후 초안 보존, 백그라운드 accessory 전환·재열기와 정상 종료를 별도 임시 앱에서 확인했다.
 - 앱 모델 테스트는 `Apps/Lathe/Package.swift`의 별도 harness다. native 앱 build와 실제 화면 조작 검증은 따로 기록한다.
 - native 조작 검증은 프로젝트·mock 입력·중단·재접속·이력·Settings 흐름을 포함한다. 새 연결 설정 저장과 모델·권한 선택 화면도 확인했다. 격리된 프로젝트와 localhost fixture에서 앱의 일회성 파일 수정 승인 → 명령 승인 → 최종 응답 완료를 확인했다. 실제 API 키 저장은 이 조작 검증에 포함하지 않았다.
 - 로컬 환경은 macOS 27.0.1 / Xcode 27.0 / Swift 6.4 / Apple Silicon이다. deployment target 15 빌드와

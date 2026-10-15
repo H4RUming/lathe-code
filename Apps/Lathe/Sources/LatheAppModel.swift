@@ -2,7 +2,15 @@ import AppKit
 import Combine
 import Foundation
 import LatheDomain
+import LatheEngineHost
 import LatheProtocol
+
+protocol AppEngineHost: Sendable {
+    func start() async throws -> EngineInfo
+    func stop() async
+}
+
+extension EngineHost: AppEngineHost {}
 
 protocol AppEngineClient: Sendable {
     func connect() async throws -> EngineInfo
@@ -56,10 +64,15 @@ final class LatheAppModel: ObservableObject {
     @Published private(set) var toolInvocations: [UUID: [ToolInvocationSnapshot]] = [:]
     @Published private(set) var decidingApprovals: Set<UUID> = []
     @Published private(set) var isSavingProfile = false
+    @Published private(set) var isExitDecisionPending = false
+    @Published private(set) var isShuttingDown = false
     @Published var draft = ""
     @Published var errorMessage: String?
 
     private var client: (any AppEngineClient)?
+    private var host: (any AppEngineHost)?
+    private var hostStarted = false
+    private var shutdownTask: Task<Void, Never>?
     private var connectionTask: Task<Void, Never>?
     private var pollTask: Task<Void, Never>?
     private var connectionGeneration: UInt64 = 0
@@ -68,33 +81,45 @@ final class LatheAppModel: ObservableObject {
     private var drafts: [UUID: String] = [:]
     private(set) var dataDirectory: URL?
 
-    init(client: (any AppEngineClient)? = nil) {
+    init(client: (any AppEngineClient)? = nil, host: (any AppEngineHost)? = nil) {
         self.client = client
+        self.host = host
     }
 
     var selectedProfile: ProviderProfile? { profiles.first { $0.id == selectedProfileID } }
-    var canChangeRunConfiguration: Bool { selectedSession?.activeRun == nil && !isSubmitting }
+    var acceptsUserActions: Bool { !isExitDecisionPending && !isShuttingDown }
+    var hasUnsentDrafts: Bool {
+        !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || drafts.contains { $0.key != selectedSessionID && !$0.value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    }
+    var hasUnfinishedWork: Bool {
+        hasUnsentDrafts || isSubmitting || isCreatingSession || isSavingProfile || isCancelling || !decidingApprovals.isEmpty
+            || selectedSession?.activeRunID != nil || sessions.contains { $0.activeRunID != nil }
+    }
+    var canChangeRunConfiguration: Bool { acceptsUserActions && selectedSession?.activeRun == nil && !isSubmitting }
 
     var draftByteCount: Int { draft.utf8.count }
     var isDraftOverLimit: Bool { draftByteCount > Self.promptByteLimit }
 
     var canSubmit: Bool {
-        isConnected && selectedSession != nil && selectedSession?.activeRun == nil
+        acceptsUserActions && isConnected && selectedSession != nil && selectedSession?.activeRun == nil
             && (selectedProfileID == nil || selectedProfile != nil)
             && !isSubmitting && !isDraftOverLimit && !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     var connectionLabel: String {
+        if isShuttingDown { return "작업을 정리하고 종료하는 중" }
         if isConnecting { return "엔진에 연결하는 중" }
         return isConnected ? "로컬 엔진 연결됨" : "엔진 연결 끊김"
     }
 
     func ensureConnected() async {
-        guard !isConnected else { return }
+        guard acceptsUserActions, !isConnected else { return }
         await connect()
     }
 
     func connect() async {
+        guard acceptsUserActions else { return }
         if let connectionTask { await connectionTask.value; return }
         // Window .task cancellation must not cancel the connection shared by other windows.
         let task = Task { [weak self] in
@@ -106,6 +131,7 @@ final class LatheAppModel: ObservableObject {
     }
 
     private func performConnect() async {
+        guard acceptsUserActions, !Task.isCancelled else { return }
         isConnecting = true
         isConnected = false
         errorMessage = nil
@@ -122,14 +148,29 @@ final class LatheAppModel: ObservableObject {
                     .flatMap { $0.isEmpty ? nil : URL(fileURLWithPath: $0, isDirectory: true) }
                 let paths = try EnginePaths(root: override)
                 dataDirectory = paths.directory
-                let helper = Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/lathe-engine")
-                client = EngineClient(paths: paths, executableURL: helper)
+                let runner = Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/lathe-runner")
+                host = EngineHost(paths: paths, runnerURL: runner)
+                client = EngineClient(paths: paths)
+            }
+            var ownedInfo: EngineInfo?
+            if let host {
+                ownedInfo = try await host.start()
+                guard !isShuttingDown, generation == connectionGeneration, !Task.isCancelled else {
+                    await host.stop()
+                    return
+                }
+                hostStarted = true
             }
             guard let client else { return }
             let info = try await client.connect()
+            if let ownedInfo {
+                guard info.engineID == ownedInfo.engineID, info.processID == ownedInfo.processID else {
+                    throw LatheError.transport("이 앱이 소유한 엔진과 연결 정보가 일치하지 않습니다.")
+                }
+            }
             let latest = try await client.listSessions()
             let latestProfiles = try await client.providerProfiles()
-            guard generation == connectionGeneration, !Task.isCancelled else { return }
+            guard !isShuttingDown, generation == connectionGeneration, !Task.isCancelled else { return }
             engineInfo = info
             sessions = latest
             profiles = latestProfiles
@@ -152,6 +193,7 @@ final class LatheAppModel: ObservableObject {
     }
 
     func selectSession(_ id: UUID?) {
+        guard !isShuttingDown else { return }
         prepareSelection(id)
         guard let client, id != nil else { return }
         let generation = selectionGeneration
@@ -176,6 +218,7 @@ final class LatheAppModel: ObservableObject {
     }
 
     func chooseProject() {
+        guard acceptsUserActions else { return }
         let panel = NSOpenPanel()
         panel.title = "Lathe에서 작업할 프로젝트 선택"
         panel.prompt = "프로젝트 열기"
@@ -190,6 +233,7 @@ final class LatheAppModel: ObservableObject {
     }
 
     func newSession() {
+        guard acceptsUserActions else { return }
         guard let selectedSession else { chooseProject(); return }
         let directory = URL(fileURLWithPath: selectedSession.workspacePath, isDirectory: true)
         Task { await createSession(in: directory) }
@@ -204,6 +248,7 @@ final class LatheAppModel: ObservableObject {
         errorMessage = nil
         Task {
             defer { isSubmitting = false }
+            guard !isShuttingDown else { return }
             do {
                 if let configuration {
                     _ = try await client.submitConfigured(sessionID: sessionID, prompt: prompt, requestID: requestID, configuration: configuration)
@@ -211,6 +256,7 @@ final class LatheAppModel: ObservableObject {
                     _ = try await client.submit(sessionID: sessionID, prompt: prompt, requestID: requestID)
                 }
             } catch {
+                guard !isShuttingDown else { return }
                 if let failure = error as? RPCFailure,
                    [-32600, -32601, -32602, -32004, -32009].contains(failure.code) {
                     errorMessage = "요청이 거절되었습니다. \(failure.localizedDescription)"
@@ -219,6 +265,7 @@ final class LatheAppModel: ObservableObject {
                 }
                 return
             }
+            guard !isShuttingDown else { return }
             if drafts[sessionID] == prompt { drafts[sessionID] = "" }
             if selectedSessionID == sessionID, draft == prompt { draft = "" }
             do {
@@ -231,7 +278,7 @@ final class LatheAppModel: ObservableObject {
     }
 
     func loadEarlierRuns() {
-        guard let client, let id = selectedSessionID, let before = earlierCursor, !isLoadingEarlier else { return }
+        guard !isShuttingDown, let client, let id = selectedSessionID, let before = earlierCursor, !isLoadingEarlier else { return }
         let generation = selectionGeneration
         isLoadingEarlier = true
         Task {
@@ -251,7 +298,7 @@ final class LatheAppModel: ObservableObject {
     }
 
     func stopRun() {
-        guard let client, let run = selectedSession?.activeRun, !isCancelling else { return }
+        guard acceptsUserActions, let client, let run = selectedSession?.activeRun, !isCancelling else { return }
         isCancelling = true
         Task {
             defer { isCancelling = false }
@@ -265,7 +312,7 @@ final class LatheAppModel: ObservableObject {
     }
 
     private func createSession(in directory: URL) async {
-        guard let client, isConnected, !isCreatingSession else { return }
+        guard acceptsUserActions, let client, isConnected, !isCreatingSession else { return }
         isCreatingSession = true
         errorMessage = nil
         defer { isCreatingSession = false }
@@ -279,7 +326,9 @@ final class LatheAppModel: ObservableObject {
     }
 
     private func refreshSessions(using client: any AppEngineClient) async throws {
-        sessions = try await client.listSessions()
+        let latest = try await client.listSessions()
+        guard !isShuttingDown else { return }
+        sessions = latest
     }
 
     private func refreshSelectedSession(using client: any AppEngineClient) async throws {
@@ -318,7 +367,7 @@ final class LatheAppModel: ObservableObject {
     }
 
     func saveProfile(_ profile: ProviderProfile, apiKey: String?, clearCredential: Bool) async -> Bool {
-        guard let client, isConnected, !isSavingProfile else { return false }
+        guard acceptsUserActions, let client, isConnected, !isSavingProfile else { return false }
         isSavingProfile = true
         defer { isSavingProfile = false }
         do {
@@ -333,7 +382,7 @@ final class LatheAppModel: ObservableObject {
     }
 
     func decideApproval(_ invocation: ToolInvocationSnapshot, approved: Bool) {
-        guard let client, isConnected, !decidingApprovals.contains(invocation.id),
+        guard acceptsUserActions, let client, isConnected, !decidingApprovals.contains(invocation.id),
               selectedSession?.activeRun?.id == invocation.runID,
               toolInvocations[invocation.runID]?.contains(where: {
                   $0.id == invocation.id && $0.state == .pendingApproval && $0.requestHash == invocation.requestHash
@@ -365,6 +414,7 @@ final class LatheAppModel: ObservableObject {
     }
 
     private func disconnectAfterFailure(_ message: String, error: Error) {
+        guard !isShuttingDown else { return }
         isConnected = false
         pollTask?.cancel()
         errorMessage = "\(message) \(error.localizedDescription)"
@@ -389,10 +439,52 @@ final class LatheAppModel: ObservableObject {
                 } catch {
                     guard self.connectionGeneration == generation else { return }
                     self.isConnected = false
-                    self.errorMessage = "연결이 끊겼습니다. 실행은 엔진에서 계속될 수 있습니다. 다시 연결해 상태를 확인하세요. \(error.localizedDescription)"
+                    self.errorMessage = "앱 내부 엔진 연결을 확인하지 못했습니다. 앱을 종료하면 진행 중인 작업도 중단됩니다. \(error.localizedDescription)"
                     return
                 }
             }
         }
+    }
+
+    func beginExitDecision() {
+        guard !isShuttingDown else { return }
+        isExitDecisionPending = true
+    }
+
+    func cancelExitDecision() {
+        guard !isShuttingDown else { return }
+        isExitDecisionPending = false
+    }
+
+    /// Include sessions submitted through the shared CLI since the last UI poll.
+    func requiresTerminationConfirmation() async -> Bool {
+        if hasUnfinishedWork { return true }
+        guard !isShuttingDown, let client, hostStarted || isConnected else { return false }
+        do {
+            try await refreshSessions(using: client)
+            return hasUnfinishedWork
+        } catch {
+            // An unavailable snapshot must not be interpreted as an idle runtime.
+            return true
+        }
+    }
+
+    /// UI admission closes synchronously before the first suspension. EngineHost
+    /// then closes RPC admission and awaits worker/runner cleanup before returning.
+    func shutdown() async {
+        if let shutdownTask { await shutdownTask.value; return }
+        isShuttingDown = true
+        isExitDecisionPending = false
+        isConnected = false
+        isConnecting = false
+        connectionGeneration &+= 1
+        selectionGeneration &+= 1
+        connectionTask?.cancel()
+        pollTask?.cancel()
+        let ownedHost = host
+        let task = Task<Void, Never> { if let ownedHost { await ownedHost.stop() } }
+        shutdownTask = task
+        await task.value
+        engineInfo = nil
     }
 }

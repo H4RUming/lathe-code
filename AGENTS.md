@@ -2,7 +2,9 @@
 
 ## 제품 방향
 
-- Swift 기반 macOS 네이티브 앱과 공통 CLI를 만든다.
+- Swift 기반 macOS 네이티브 **단일 앱**을 만든다. runtime/DB/모델/도구 실행의 owner는 앱 프로세스다.
+- 별도 상주 engine, 로그인 agent, 시스템 CLI를 설치하지 않는다. CLI와 standalone engine은 명시적인 개발·검증 빌드에서만 제공한다.
+- 마지막 작업 창 닫기·종료 시 진행 중 작업이나 미전송 입력이 있으면 중단 후 종료/백그라운드 유지/취소를 선택한다. 미완료 작업이 없으면 종료하며 앱 밖 daemon을 남기지 않는다.
 - Claude Code의 작업 흐름과 확장 기능 동등성을 목표로 한다. 모델 결과 품질의 동일성을 약속하지 않는다.
 - OpenAI, Google AI Studio, Vertex, Claude, vLLM, Ollama 및 기타 모델 서버를 지원한다.
 - 모델 서버는 localhost/LAN/외부 주소 모두 가능하다. 모델 연결과 코드 실행 환경을 분리한다.
@@ -16,7 +18,7 @@
 - `docs/features.md`의 LAT ID, `docs/extensions.md`의 호환 계약, `docs/architecture.md`의 경계를 유지한다.
 - 추론/Ultra는 `docs/reasoning-and-ultra.md`, 검색/MCP 자동화는 `docs/tools-and-mcp-authoring.md`의 세부 계약도 확인한다.
 - 구조나 범위가 달라지면 관련 문서도 갱신한다. 일부 구현을 전체 기능 지원으로 표시하지 않는다.
-- GUI/CLI는 같은 engine과 ToolBroker를 사용한다. provider DTO를 UI나 공통 실행 코어에 퍼뜨리지 않는다.
+- 앱과 선택적인 개발 client는 앱 내부의 같은 runtime과 ToolBroker를 사용한다. 개발 CLI는 기본 attach-only이며 독립 테스트 engine 시작은 명시적인 옵션·데이터 root가 필요하다. provider DTO를 UI나 공통 실행 코어에 퍼뜨리지 않는다.
 - 취소·복구·권한·스트리밍 경계의 검증을 우선하고, 실제로 수행하지 않은 검증은 완료했다고 보고하지 않는다.
 
 ## 변경 기록

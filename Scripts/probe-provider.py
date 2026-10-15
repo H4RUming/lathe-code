@@ -86,7 +86,7 @@ def main():
             # Never inherit API keys, proxy variables, shell startup configuration,
             # or any of the caller's private environment into the test engine.
             environment = {"PATH": "/usr/bin:/bin:/usr/sbin:/sbin", "LANG": "en_US.UTF-8", "TMPDIR": str(tmp)}
-            cli_command = [str(cli), "--data-dir", str(root), "--engine", str(engine)]
+            cli_command = [str(cli), "--root", str(root)]
             owned = subprocess.Popen([str(engine), "--root", str(root)], env=environment,
                                      stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             active_run = None

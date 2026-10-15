@@ -175,7 +175,7 @@ usage가 누락되어 정확히 정산할 수 없으면 예약량을 소비한 �
 native 추론 옵션을 유지한다. 혼합 역할 profile도 각 역할의 추론 활성 조건을 검사한다. disabled 선택지는 원인을 짧게 보여준다.
 Ultra 실행 화면에는 phase, agent 역할·모델·실제 추론 설정, queued/running, 요청 slot, writer owner, 누적 예산을 표시한다.
 추론 표시 접기/펴기는 별도 UI 설정이며 실행 모드를 바꾸지 않는다. 원본 signature 보존은 표시 설정과 독립이다.
-CLI도 같은 typed configuration을 사용한다. 최종 flag 이름을 정할 때 local preset과 native reasoning JSON/typed flags를 분리하고 상충 옵션을 거절한다.
+선택적으로 빌드한 개발 CLI도 실행 중인 앱에 연결해 같은 typed configuration을 사용한다. 최종 flag 이름을 정할 때 local preset과 native reasoning JSON/typed flags를 분리하고 상충 옵션을 거절한다.
 
 | 검증 ID | 통과 조건 |
 | --- | --- |

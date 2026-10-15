@@ -1,7 +1,7 @@
 # 네이티브 실행 helper 계약
 
-2026-10-15. `LatheExecution`은 Swift 실행 라이브러리, `lathe-runner`는 별도 네이티브
-실행 helper다. `LAT-TOOL-007/008`, EXEC, PERM의 기반이며 전체 요구사항 완료가 아니다.
+2026-10-16. `LatheExecution`은 Swift 실행 라이브러리, `lathe-runner`는 `Lathe.app` 번들에 포함된
+명령 실행 helper다. runtime/DB를 소유한 독립 daemon이 아니며 명령 수명 동안만 실행한다. `LAT-TOOL-007/008`, EXEC, PERM의 기반이며 전체 요구사항 완료가 아니다.
 M1 첫 coding loop에서 공통 ToolBroker/PolicyEngine을 거친 승인된 `run_command`를 연결했다.
 모델 도구는 비대화형 pipe 실행이며 아래 PTY 제어는 아직 앱 터미널에 연결하지 않았다.
 제품 사용 계약과 실제 승인 범위는 [첫 코딩 흐름](coding-preview.md)을 따른다.
@@ -90,7 +90,7 @@ helper journal은 엔진 데이터 아래 invocation별 디렉터리에 보존�
 
 ```sh
 swift test --package-path Packages/LatheKit
-Scripts/build-app.sh
+Scripts/build-app.sh --developer-tools
 python3 Scripts/smoke-runner.py --runner .build/macos/lathe-runner
 ```
 
