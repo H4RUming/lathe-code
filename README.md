@@ -6,9 +6,11 @@ Swift로 만드는 개인용 macOS 코딩 에이전트. Claude Code와 동등한
 Vertex AI, Anthropic Claude, vLLM, Ollama 및 기타 모델 서버를 지원할 계획입니다.
 모델 서버는 같은 Mac, LAN, 외부 서버 어디에나 둘 수 있습니다.
 
-현재 **M0 실행 기반의 첫 구현**입니다. SwiftUI/AppKit 앱과 CLI가 별도 Swift 엔진에
+현재 **M0 실행 기반을 구현 중**입니다. SwiftUI/AppKit 앱과 CLI가 별도 Swift 엔진에
 연결되어 세션 생성, 모의 응답 스트리밍, 중단, 대화 이력 조회와 재접속을 제공합니다.
 SQLite에 작업과 이벤트를 저장하며 엔진 재시작 시 미완료 작업을 `interrupted`로 복구합니다.
+별도 네이티브 실행 helper에 pipe/PTY 입출력, 명령 취소·시간/출력 제한과 실행 기록을 추가했습니다.
+이 helper는 개발 검증용이며 [실행 계약](docs/runner.md)에 범위와 제약을 기록합니다.
 
 실제 모델·파일 편집·터미널·검색·MCP·Ultra는 후속 단계입니다. 현재 앱은 **mock 모드**를
 명시하며 프로젝트 파일을 변경하거나 모델 API를 호출하지 않습니다.
@@ -32,6 +34,7 @@ Xcode에서는 `Apps/Lathe/Lathe.xcodeproj`의 **Lathe** scheme을 실행합니�
 .build/macos/lathe sessions
 swift test --package-path Packages/LatheKit
 python3 Scripts/smoke-engine.py --bin-dir .build/macos
+python3 Scripts/smoke-runner.py --runner .build/macos/lathe-runner
 ```
 
 빌드 결과는 현재 Mac 아키텍처용 개발 빌드이며 ad-hoc 서명입니다.

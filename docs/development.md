@@ -9,12 +9,15 @@
 SwiftUI/AppKit 앱과 CLI가 동일한 Swift engine 프로세스와 SQLite 데이터를 사용한다.
 실제 provider, 파일·shell 도구, 검색, MCP, reasoning/Ultra, 편집기와 디버거는 아직 구현하지 않았다.
 프로젝트 선택은 경로를 세션에 연결하며 파일 수집·스크립트 실행을 시작하지 않는다.
+별도 개발 helper `lathe-runner`는 실제 명령/PTY를 실행하고 취소·한도·실행 기록을 처리한다.
+앱의 mock engine에는 아직 연결하지 않으며 상세 계약은 [runner.md](runner.md)를 따른다.
 
 | 관련 요구사항 | 이번 구현 | 남은 범위 |
 | --- | --- | --- |
 | LAT-CORE-001/002/006 | mock 스트림·취소·재접속 기반 | 실제 모델/tool loop·권한·retry·steering |
 | SESSION 계열 | 세션·run·이벤트 저장, 이력 페이지, 중복 submit 방지 | fork/rewind/archive/export·작업 복구 확장 |
 | UI/CLI 계열 | 네이티브 창·프로젝트 선택·대화·초안·CLI 공통 연결 | 편집기/PTY/diff/검사 화면·완전한 접근성 검증 |
+| TOOL-007/008, EXEC/PERM 기반 | 별도 runner pipe/PTY·입력/resize·취소·journal | ToolBroker·권한·격리·background·터미널 화면 |
 
 표의 기반 구현은 각 LAT 요구사항의 전체 수용 기준 통과를 뜻하지 않는다.
 
@@ -34,14 +37,15 @@ open .build/macos/Lathe.app
 - `.build/macos/Lathe.app`: 현재 host 아키텍처의 네이티브 개발 앱.
 - `.build/macos/lathe`: CLI.
 - `.build/macos/lathe-engine`: CLI가 시작하는 엔진.
-- 앱에도 `Contents/Helpers/lathe-engine`이 내장된다.
+- `.build/macos/lathe-runner`: 내부 실행 검증용 helper.
+- 앱에도 `Contents/Helpers/lathe-engine`과 `lathe-runner`가 내장된다.
 
 `--configuration release`로 release configuration을 선택한다.
 `--output`, `--scratch-path`, `--derived-data-path`로 빌드 위치를 바꿀 수 있다.
 앱은 개발용 ad-hoc 서명이며 Developer ID 서명·공증·universal 배포는 후속이다.
 
 Xcode에서 `Apps/Lathe/Lathe.xcodeproj` → **Lathe** scheme → **My Mac**으로 실행할 수도 있다.
-앱 target의 build phase가 engine을 SwiftPM으로 빌드해 내장하므로 Xcode Run에서도 별도 수동 복사가 필요 없다.
+앱 target의 build phase가 engine/runner를 SwiftPM으로 빌드해 내장하므로 Xcode Run에서도 별도 수동 복사가 필요 없다.
 
 코어만 빌드하려면:
 
@@ -101,7 +105,8 @@ lathe CLI ─────┘                              └─ deterministic m
 - 엔진 교체 빌드는 이미 실행 중인 프로세스를 교체하지 않는다. 개발 중에는 앱을 종료한 후
   `lathe status`의 PID를 확인해 `kill -TERM PID`로 해당 엔진을 종료하고 다시 접속한다.
 - engine 종료 시 running 작업은 다음 시작에서 `interrupted`로 한 번만 기록한다. 자동 재실행하지 않는다.
-- OS sandbox/runner 격리는 아직 없다. 현재 파일 변경·외부 명령 도구가 없는 단계이며 경로 권한 검사를 OS 격리로 표시하지 않는다.
+- 앱의 파일 변경·외부 명령 도구와 OS 격리는 아직 없다. 별도 runner는 비격리 개발 helper이며
+  원래 process group 종료 기능을 sandbox나 자식 전체 containment로 표시하지 않는다.
 
 ## 구현 계약
 
@@ -113,6 +118,8 @@ lathe CLI ─────┘                              └─ deterministic m
 | LatheRuntime | actor 직렬화·mock worker·submit/cancel·시작 시 복구 |
 | LatheEngine | 별도 process entry·RPC dispatch·종료 signal |
 | LatheCLI | headless 입력·출력·현재 run 관찰·SIGINT |
+| LatheExecution / CLatheExecution | Swift 실행 수명·byte stream·입력/제한, POSIX spawn/PTY primitive |
+| LatheRunner | 별도 helper·NDJSON 제어·fsync intent/events/result journal |
 | Apps/Lathe | SwiftUI/AppKit presentation·선택/초안·재연결·상태 projection |
 
 IPC v1은 길이 4-byte big-endian + JSON, 프레임 최대 1 MiB, 요청당 한 연결/한 응답이다.
@@ -138,6 +145,9 @@ swift test --package-path Packages/LatheKit
 swift test --package-path Apps/Lathe
 Scripts/build-app.sh
 python3 Scripts/smoke-engine.py --bin-dir .build/macos
+python3 Scripts/smoke-runner.py --runner .build/macos/lathe-runner
+python3 Scripts/probe-sandbox.py --output .build/probes/sandbox.json
+python3 Scripts/probe-lldb-dap.py --output .build/probes/lldb-dap.json
 ```
 
 테스트는 API 키가 필요 없다. smoke는 임시 프로젝트/데이터로 실제 engine을 시작하고
@@ -146,7 +156,10 @@ python3 Scripts/smoke-engine.py --bin-dir .build/macos
 - Swift tests: 원자적 저장/실패 rollback, cancel, idempotency, recovery, pagination/최대 입력,
   run 필터 replay, frame 분할/상한/timeout/cancellation, socket·lease·동시 경로 생성.
 - 앱 모델 회귀 테스트는 `Apps/Lathe/Package.swift`의 별도 test harness로 실행하며 Xcode 앱 빌드와 분리한다.
-  현재 코어 22개, 앱 모델 6개 테스트(매개변수 사례 포함 7건)가 로컬에서 통과했다.
+  현재 코어 33개, 앱 모델 6개 테스트(매개변수 사례 포함 7건)가 로컬에서 통과했다.
+- 실행 테스트 11개는 실제 raw byte pipe·argv/cwd/env·PTY 제어·취소·한도와 원래 group 자식 정리를 검사한다.
+- helper smoke는 intent 선행 저장, private journal·atomic result, 경로 교체, 입력/EOF,
+  취소·timeout·출력 초과·잘못된 제어·owner 연결 상실을 검사한다.
 - process smoke: 6개 CLI 동시 bootstrap, RPC 오류, 중복/충돌, 스트림과 저장 결과 일치,
   Ctrl-C, 페이지 이력, SIGKILL 후 stale socket/미완료 복구, sequence replay, 입력 한도,
   SIGTERM 정상 종료 후 socket 정리를 최종 개발 바이너리로 검증했다.
@@ -154,8 +167,12 @@ python3 Scripts/smoke-engine.py --bin-dir .build/macos
   앱 재실행 이력 복원, 세션 전환, 이전 대화 로드, Settings.
 - 로컬 실행 환경: macOS 27.0.1 / Xcode 27.0 / Swift 6.4 / Apple Silicon.
   deployment target 15.0 빌드 성공과 macOS 15 실기기 실행 검증은 구분한다. 후자는 아직 미검증이다.
-- `.github/workflows/macos.yml`에 package tests·app build·process smoke·개발 artifact 업로드를 정의한다.
+- `.github/workflows/macos.yml`에 package tests·app build·engine/runner smoke·sandbox probe·개발 artifact 업로드를 정의한다.
   원격 CI 통과는 GitHub 실행 결과를 확인한 경우에만 별도로 보고한다.
+- [sandbox probe](probes/sandbox.md): 실제 host에서 7개 fixture 통과. deprecated backend의 실험이며 production 격리 미구현이다.
+- [LLDB-DAP probe](probes/lldb-dap.md): Swift 컴파일·initialize 성공, 실제 launch/attach timeout으로 fail.
+  debugger 지원 게이트는 미완료다. CI에서는 workflow_dispatch의 `debugger_probe`로 별도 실행하며,
+  timeout은 실패, 명시적 환경 미지원만 unsupported로 보존한다.
 
-다음 구현 단위는 runner pipe/PTY·process group 취소·sandbox backend·LLDB-DAP spike다.
-실제 provider/도구는 그 경계를 검증한 뒤 M1에서 연결한다.
+다음 구현 단위는 일반 blob 저장·engine 실행 journal 연결, 공통 ToolBroker/PolicyEngine과 첫 실제 provider다.
+debugger timeout과 sandbox backend 적용은 별도 미완료 항목으로 추적한다.

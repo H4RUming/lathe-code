@@ -7,19 +7,25 @@ case "$CONFIGURATION" in
     *) package_configuration=debug ;;
 esac
 
-if [ -n "${LATHE_ENGINE_BINARY:-}" ]; then
+if [ -n "${LATHE_ENGINE_BINARY:-}" ] && [ -n "${LATHE_RUNNER_BINARY:-}" ]; then
     engine_binary=$LATHE_ENGINE_BINARY
+    runner_binary=$LATHE_RUNNER_BINARY
 else
     package_scratch="$repository_root/.build/xcode-helper"
     env -u SDKROOT -u SWIFT_EXEC xcrun swift build \
         --package-path "$repository_root/Packages/LatheKit" \
         --scratch-path "$package_scratch" \
         --configuration "$package_configuration" --product lathe-engine
+    env -u SDKROOT -u SWIFT_EXEC xcrun swift build \
+        --package-path "$repository_root/Packages/LatheKit" \
+        --scratch-path "$package_scratch" \
+        --configuration "$package_configuration" --product lathe-runner
     package_bin=$(env -u SDKROOT -u SWIFT_EXEC xcrun swift build \
         --package-path "$repository_root/Packages/LatheKit" \
         --scratch-path "$package_scratch" \
         --configuration "$package_configuration" --show-bin-path)
     engine_binary="$package_bin/lathe-engine"
+    runner_binary="$package_bin/lathe-runner"
 fi
 
 if [ ! -x "$engine_binary" ]; then
@@ -32,3 +38,10 @@ mkdir -p "$helper_directory"
 cp "$engine_binary" "$helper_directory/lathe-engine"
 chmod 755 "$helper_directory/lathe-engine"
 /usr/bin/codesign --force --sign - "$helper_directory/lathe-engine"
+if [ ! -x "$runner_binary" ]; then
+    echo "error: lathe-runner executable missing: $runner_binary" >&2
+    exit 1
+fi
+cp "$runner_binary" "$helper_directory/lathe-runner"
+chmod 755 "$helper_directory/lathe-runner"
+/usr/bin/codesign --force --sign - "$helper_directory/lathe-runner"

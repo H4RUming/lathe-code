@@ -32,17 +32,20 @@ swift build --package-path "$repository_root/Packages/LatheKit" \
     --scratch-path "$package_scratch" --configuration "$configuration" --product lathe-engine
 swift build --package-path "$repository_root/Packages/LatheKit" \
     --scratch-path "$package_scratch" --configuration "$configuration" --product lathe
+swift build --package-path "$repository_root/Packages/LatheKit" \
+    --scratch-path "$package_scratch" --configuration "$configuration" --product lathe-runner
 package_bin=$(swift build --package-path "$repository_root/Packages/LatheKit" \
     --scratch-path "$package_scratch" --configuration "$configuration" --show-bin-path)
 
 xcodebuild -project "$repository_root/Apps/Lathe/Lathe.xcodeproj" \
     -scheme Lathe -configuration "$xcode_configuration" -destination 'platform=macOS' \
     -derivedDataPath "$derived_data" \
-    "LATHE_ENGINE_BINARY=$package_bin/lathe-engine" build
+    "LATHE_ENGINE_BINARY=$package_bin/lathe-engine" "LATHE_RUNNER_BINARY=$package_bin/lathe-runner" build
 
 ditto "$derived_data/Build/Products/$xcode_configuration/Lathe.app" "$output_directory/Lathe.app"
 cp "$package_bin/lathe" "$output_directory/lathe"
 cp "$package_bin/lathe-engine" "$output_directory/lathe-engine"
+cp "$package_bin/lathe-runner" "$output_directory/lathe-runner"
 codesign --verify --deep --strict "$output_directory/Lathe.app"
 echo "Built app: $output_directory/Lathe.app"
 echo "Built CLI: $output_directory/lathe"

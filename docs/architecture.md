@@ -5,7 +5,9 @@
 현재는 `LatheDomain`·`LatheProtocol`·`LathePersistence`·`LatheRuntime`·`LatheEngine`·`LatheCLI`와
 SwiftUI/AppKit 앱이 구현되어 있다. `EngineRuntime` actor가 SQLite C API wrapper를 단독 소유하며
 1 MiB framed JSON-RPC와 cursor polling으로 mock 작업을 공유한다. 아래의 ToolBroker, provider,
-세부 coordinator, runner, blob store 등은 후속 목표다. 실제 계약·검증 범위는 [개발 가이드](development.md)에 기록한다.
+`LatheExecution`과 별도 `lathe-runner`의 pipe/PTY·취소·실행 journal은 개발 helper로 구현했다.
+공통 ToolBroker 연결, 세부 coordinator와 blob store는 후속 목표다. 실제 계약·검증 범위는
+[개발 가이드](development.md)와 [실행 helper](runner.md)에 기록한다.
 
 ## 1. 기준과 문서 경계
 

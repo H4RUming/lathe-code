@@ -51,7 +51,10 @@ M0~M6는 로컬 코딩 에이전트와 네이티브 사용 흐름의 완성 범�
 첫 구현 범위: SwiftUI/AppKit 앱·공통 client·별도 engine·CLI, versioned Unix IPC,
 SQLite WAL journal, mock 스트리밍·취소·재접속·crash recovery, package tests와 macOS CI 정의.
 이벤트 전달은 cursor 기반 polling이며 persistent subscription은 후속이다.
-blob store, runner/PTY·자식 취소, sandbox backend, LLDB-DAP spike는 아직 남아 있다.
+runner/pipe/PTY·원래 process group 취소와 helper intent/result journal을 추가했다.
+sandbox fixture probe는 host에서 통과했지만 production backend는 아니다.
+LLDB-DAP 발견·initialize는 성공했고 실제 launch/attach는 host timeout으로 미완료다.
+일반 blob store와 engine ToolInvocation 연결, sandbox 적용 backend는 아직 남아 있다.
 최소 OS 실행과 GitHub Actions 원격 실행 결과는 로컬 빌드 성공과 별도로 확인한다.
 
 - Xcode 앱·로컬 Package·Swift 6 설정, 최소 UI/mock provider, macOS CI build.
@@ -215,7 +218,8 @@ Claude와 Lathe 차등 검증은 사용자 동작·설정 계약을 비교하며
 
 ## 5. 다음 구현 단위
 
-Swift 앱/engine/CLI의 mock attach→stream→cancel→reconnect 흐름 다음은 M0의
-runner pipe·process group 취소·PTY·sandbox·LLDB-DAP 기술 검증이다. 실패/미지원 결과와
-backend 선택을 기록한 뒤 M1의 실제 provider와 ToolBroker를 연결한다.
+Swift 앱/engine/CLI mock 흐름과 별도 runner의 pipe·process group 취소·PTY 검증을 구현했다.
+다음은 일반 blob 저장·engine 실행 journal 연결과 M1의 PolicyEngine/ToolBroker·첫 provider다.
+LLDB launch/attach timeout은 별도 미완료 게이트로 남기며 debugger 제품 연결 전에 해결한다.
+sandbox probe 통과를 production 격리 완료로 확대하지 않는다.
 실제 모델이나 도구 실행이 없는 현재 상태를 coding loop 완료로 표시하지 않는다.

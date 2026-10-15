@@ -3,6 +3,12 @@ name: macOS
 on:
   push:
   pull_request:
+  workflow_dispatch:
+    inputs:
+      debugger_probe:
+        description: Run the LLDB launch/attach feasibility probe
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -29,6 +35,23 @@ jobs:
         run: Scripts/build-app.sh
       - name: Engine and CLI integration smoke
         run: python3 Scripts/smoke-engine.py --bin-dir .build/macos
+      - name: Runner integration smoke
+        run: python3 Scripts/smoke-runner.py --runner .build/macos/lathe-runner
+      - name: Experimental sandbox probe
+        run: |
+          result=0
+          python3 Scripts/probe-sandbox.py --output .build/probes/sandbox.json || result=$?
+          if [ "$result" = 2 ]; then
+            echo 'Sandbox probe unsupported on this runner; inspect the diagnostic artifact.' >> "$GITHUB_STEP_SUMMARY"
+          else
+            exit "$result"
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Lathe-sandbox-probe
+          path: .build/probes/sandbox.json
+          if-no-files-found: ignore
       - name: Package development app
         run: ditto -c -k --sequesterRsrc --keepParent .build/macos/Lathe.app .build/macos/Lathe.app.zip
       - uses: actions/upload-artifact@v4
@@ -38,4 +61,19 @@ jobs:
             .build/macos/Lathe.app.zip
             .build/macos/lathe
             .build/macos/lathe-engine
+            .build/macos/lathe-runner
+          if-no-files-found: error
+  debugger-probe:
+    if: github.event_name == 'workflow_dispatch' && inputs.debugger_probe
+    runs-on: macos-15
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: LLDB-DAP feasibility
+        run: python3 Scripts/probe-lldb-dap.py --allow-unsupported --output .build/probes/lldb-dap.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Lathe-debugger-probe
+          path: .build/probes/lldb-dap.json
           if-no-files-found: error
