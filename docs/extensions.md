@@ -32,8 +32,13 @@ hook·skill 전처리·MCP·subagent·workflow가 요청한 도구도 동일한 
 실제 shell/PTY는 helper runner가 담당한다. Claude SDK나 TypeScript wrapper를 핵심 엔진으로 요구하지 않는다.
 
 workspace 시작은 `discovery → passive parse/검증 → trust/activation → executable startup` 순서다.
-SessionStart/Setup hook, 프로젝트 인증 helper, 동적 skill 전처리, stdio MCP는 활성화 전에 실행하지 않는다.
-agent/hook/shell이 변경한 실행 설정과 권한 확대는 pending revision으로 남기며 사용자 출처의 명시적 수락으로만 활성화한다.
+SessionStart/Setup hook, 프로젝트 인증 helper, 동적 skill 전처리, stdio MCP는 검증된 실행 허가 전 시작하지 않는다.
+기존 ExtensionChangeAuthorization 안의 MCP 시험은 policy 재검사 후 staging 실행을 임시 허가할 수 있다.
+임시 허가는 시험 run·도구·효과·수명에 한정하며 영속 registry 활성화와 별개다. 일반 세션에는 아직 공개하지 않는다.
+agent/hook/shell이 변경한 실행 설정은 pending revision으로 검사한다. 사용자 출처의 유효한
+`ExtensionChangeAuthorization`에 포함된 변경은 시험·정책 재검사 후 정확한 revision을 자동 활성화한다.
+이 위임은 사용자가 맡긴 MCP 설정/제작의 대상·runtime/dependency·접속·효과·예산 범위를 고정한다.
+grant 밖의 실행/권한 확대는 사용자 결정이 필요하다. agent가 grant를 발급하거나 자신의 deny/trust를 바꾸지 못한다.
 승인 DB·engine 설정/IPC 경로는 file tool과 검증된 sandbox의 직접 쓰기 대상에서 제외한다.
 비격리 same-user process까지 이 규칙만으로 OS 수준에서 막는다고 주장하지 않는다.
 
@@ -306,6 +311,22 @@ cancel은 request ID에 연결한 protocol cancellation을 보낸다. 뒤늦게 
 재전송하지 않는다. 서버가 취소를 무시할 수 있으므로 `cancel requested`와 실행 효과를 구분한다.
 [MCP cancellation](https://modelcontextprotocol.io/specification/2025-11-25/basic/utilities/cancellation)
 
+### 자연어 설정과 서버 제작
+
+MCP 지원 범위에는 기존 서버 사용과 함께 자연어 연결 설정, 필요한 서버의 scaffold/구현/build/test,
+등록·활성화·실제 호출·진단·업데이트가 포함된다. [도구·MCP 제작 계약](tools-and-mcp-authoring.md)이
+stage·산출물·검증을 정의하며 `LAT-MCP-001~008`, `X9`, `E2E-20/21`로 추적한다.
+사용자에게 이미 맡겨진 scope 안에서는 설정·제작·검증·활성화를 이어가고 매 단계 확인을 요구하지 않는다.
+누락한 credential과 외부 OAuth 상호작용, 허용 범위 밖의 효과만 필요한 시점에 요청한다.
+
+ToolSearch는 등록된 도구를 검색하고 선택 schema만 로드한다. 웹 검색과 프로젝트 코드 검색은 별도 도구다.
+도구를 찾았다는 사실은 실행 권한이 아니며 연결·schema revision과 실제 인자를 ToolBroker에서 다시 확인한다.
+서버가 만든 설정이나 자체 test 성공 주장으로 활성화하지 않는다. engine이 code/config digest와 검증 결과를 묶고
+사용자 출처 grant 및 현재 policy와 대조한다. `.claude` 원본 대신 `.lathe` 설정으로 등록하는 기본 규칙도 유지한다.
+
+위 링크의 2025-11-25 protocol은 baseline 참조다. 이후 protocol은 version 협상·capability·fixture를 추가해
+지원 상태를 승격한다. 선택 SDK가 지원하는 version과 최신 specification을 같다고 가정하지 않는다.
+
 ## 8. Plugins·marketplaces·LSP
 
 ### 설치와 구성
@@ -397,15 +418,16 @@ E/N/U 판정, 적용 결과, 수정 방법, 구현 milestone을 기록한다.
 - 부분 설치는 사용자가 component 목록을 보고 선택했을 때만 허용한다. 핵심 hook이 빠진 plugin을
   전체 enabled로 표시하지 않고 `partially enabled`와 제외 항목을 유지한다.
 - 신뢰할 수 없는 project 파일은 approval DB에 직접 쓰지 못한다. skill/agent/hook/shell이 만든
-  실행 설정·권한 확대는 pending revision으로 보관하고 사용자가 명시적으로 수락해야 활성화한다.
-- 이미 활성화한 동일 revision에 매번 재승인을 요구하지 않는다. 새로운 실행 코드·접속 대상·권한
-  범위가 생겼을 때 해당 변화만 검토 대상으로 만든다.
+  실행 설정은 pending revision으로 검사하며 사용자 출처 위임 범위 안에서만 자동 활성화한다.
+  실제 권한 확대는 새로운 사용자 결정이 필요하며 MCP 제작 요청을 무제한 권한 위임으로 해석하지 않는다.
+- 이미 허용된 범위에 매번 재승인을 요구하지 않는다. 위임 안의 새 코드도 digest 고정·시험·정책 검사를 거친다.
+  위임 밖의 실행 코드·접속 대상·권한 범위만 사용자 검토 대상으로 만든다. grant 철회/만료/Plan 전환은 진행 중 작업에도 적용한다.
 
 ## 10. 필수 마일스톤과 검증
 
 아래 단계는 생략 가능한 아이디어 목록이 아니다. 전체 확장 지원 완료에 필요한 작업 순서다.
 각 단계는 검증 가능한 기능 커밋으로 나누고 검증·diff 검토 후 GitHub에 반영한다.
-`X`는 이 문서의 작업 ID다. 전체 로드맵에서는 X1–X4와 X6의 기반이 M4,
+`X`는 이 문서의 작업 ID다. 전체 로드맵에서는 X1–X4와 X6/X9의 기반이 M4,
 X5와 X7의 병렬·workflow 기능이 M5, native UI 확장이 M6, 원격 실행·service 연동이 M7에 대응한다.
 OAuth와 remote MCP는 M4의 integration 지원이며, remote workspace 실행은 M7의 별도 범위다.
 
@@ -419,6 +441,7 @@ OAuth와 remote MCP는 M4의 integration 지원이며, remote workspace 실행�
 | X6 | plugins·marketplaces·LSP | 실제 bundle 설치·disable·update·rollback과 진단/탐색; `feat(plugins): manage versioned extension packages` |
 | X7 | 확장 고급 호환성 | 나머지 lifecycle, prompt/agent/mcp_tool hooks, workflows·monitors·styles·mods bridge와 MCP client capability; 기능별 커밋 |
 | X8 | 전체 호환성 gate | 아래 fixture·통합 시나리오와 미지원 inventory 검토, 사용자에게 정확한 지원표 제공 |
+| X9 | MCP 자동 설정·제작 | 위임→scaffold/build→protocol/agent 왕복 시험→등록/활성화→진단/rollback; `feat(mcp): build and activate servers within delegated scope` |
 
 X4는 X3, X5와 일부 병렬 개발할 수 있지만 활성화·권한·취소 primitive는 공유한다.
 plugin runtime을 먼저 만들고 나중에 권한을 붙이지 않는다.
@@ -438,6 +461,8 @@ source URL, 확인일, 검증한 CLI 버전 또는 `docs-only`, Lathe schema ver
   invalid output, late async result, Stop 재진입, 사용자 중지 우선.
 - MCP: 모의 stdio/HTTP 서버, pagination·schema 변경, OAuth 만료, elicitation 거절,
   remote disconnect, late response, 재전송 금지, server restart.
+- MCP 제작: 위임 범위 자동 활성화, source/config digest 교체, dependency 실패, schema/protocol 오류,
+  실제 새 도구 왕복, grant 만료/철회·Plan 전환, last-good rollback, 자동 권한 확대 거절.
 - subagent: 부모/자식 권한 교집합, 미지원 모델 alias, partial/resume, 취소 전파,
   write lease와 worktree의 사용자 변경 보존.
 - plugin/LSP: source pin, archive escape, 변경된 manifest, rollback, 누락 executable,

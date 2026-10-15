@@ -12,7 +12,14 @@ Vertex AI, Anthropic Claude, vLLM, Ollama 및 기타 모델 서버를 지원할 
 - [상세 아키텍처](docs/architecture.md)
 - [설정·Skills·Hooks·MCP·Plugins 호환 계약](docs/extensions.md)
 - [프로바이더와 원격 모델 연결](docs/providers.md)
+- [추론 단계와 Ultra 다중 에이전트](docs/reasoning-and-ultra.md)
+- [검색 도구와 MCP 자동 설정·제작](docs/tools-and-mcp-authoring.md)
 - [구현 순서와 변경별 커밋 계획](docs/roadmap.md)
+
+로컬·개인 서버 모델에는 `Off / On / Ultra`를 제공할 계획입니다. Ultra는 추론을 켠
+여러 에이전트가 조사·구현·검증을 분담하는 실행 방식입니다. 클라우드 모델의 고유 추론
+옵션은 별도로 보존합니다. 검색과 MCP는 모델 연결과 독립적이며, MCP 서버의 제작·테스트·
+등록·사용까지 사용자가 맡긴 범위 안에서 자동으로 이어가는 것이 목표입니다.
 
 개인 사용과 GitHub 소스 배포를 우선합니다. 최소 지원 버전은 macOS 15 이상을
 제안하며, SwiftUI와 AppKit으로 네이티브 UI를 구성합니다.

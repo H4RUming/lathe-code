@@ -41,6 +41,7 @@ Swift에서 ADC 전체를 재구현하는 것은 아니다. 토큰은 메모리�
 - 비밀 값은 Keychain 참조, 비밀이 아닌 설정은 로컬 저장.
 - 연결·첫 응답·스트림 무응답 제한, 취소 정책.
 - 사용자 지정 네트워크 전송 설정과 연결 설정 revision.
+- serving resource group과 동시 요청/대기 상한. 여러 URL/model이 같은 서버를 공유할 수 있음.
 
 `ModelProfile`:
 
@@ -49,6 +50,16 @@ Swift에서 ADC 전체를 재구현하는 것은 아니다. 토큰은 메모리�
 - capability별 `unknown / verified / unsupported`, 근거, 확인 시점, 사용자 override.
 - 해당 API가 지원하는 sampling/reasoning 옵션만 저장·전송.
 - 실제 추론 위치에 대한 사용자 설명/확인 상태. URL만 보고 로컬 추론이라고 단정하지 않음.
+
+`ReasoningCapability`는 추론 가능 여부만 저장하는 bool이 아니다. 제어 종류(boolean/enum/budget/always-on),
+Off/On 지원, native 값과 기본값, 요청 필드/금지 조합, 서버/template 의존성, 근거·revision을 보관한다.
+AI Studio와 Vertex가 Gemini codec을 공유해도 옵션 허용표는 서비스/API flavor별로 분리한다.
+Ollama native와 OpenAI-compatible 경로도 같은 옵션 이름을 가정하지 않는다.
+
+로컬·개인 서버에는 `Off / On / Ultra` preset을 제공한다. Off/On은 검증된 생성 제어로 해석하고,
+Ultra는 reasoning 활성 모델들을 사용하는 Runtime 전략으로 처리한다. 모델에 `ultra`를 무조건 전송하지 않는다.
+OpenAI·Google·Claude의 고유 effort/level/budget/mode는 실제 지원 값 그대로 보존하고 Ultra와 독립적으로 선택할 수 있다.
+추론 출력 표시 여부는 생성 제어와 별개다. 상세 매핑·미지원 처리·기본값은 [추론·Ultra 계약](reasoning-and-ultra.md)을 따른다.
 
 모델 목록 조회 성공은 도구 호출 지원의 증거가 아니다. 연결 진단은 일반 응답, 스트리밍, 무해한 도구 호출과 결과 반환까지 단계별로 확인한다.
 검증 결과는 URL·모델·설정 revision에 연결한다. 모든 모델의 코딩 능력이나 향후 서버 설정까지 보장하지 않는다.
@@ -99,7 +110,9 @@ protocol ModelProvider: Sendable {
 - OpenAI reasoning items, Gemini thought signatures, Anthropic thinking/signature는 provider별 규칙에 맞게 원형 보존한다.
 - provider 고유 상태는 다른 provider에 전달하지 않는다. UI에 노출할 요약과 opaque continuation 데이터를 구분한다.
 
-provider/model 변경은 실행이 끝난 시점에 가능하게 한다. 다른 연결로 전환할 때 사용자·assistant 텍스트와 도구 결과·명시적 요약으로 새 실행 분기를 만들고,
+provider/model/추론 옵션 변경은 안전한 실행 경계에서 새 snapshot으로 적용한다. 기본은 현재 turn 종료이며,
+진행 중 변경은 요청 취소·진행한 효과 정리 후 새 run으로 전환한다. Ultra의 진행 중 child에는 기존 snapshot이 유지된다.
+다른 연결로 전환할 때 사용자·assistant 텍스트와 도구 결과·명시적 요약으로 새 실행 분기를 만들고,
 출처와 전환 지점을 기록한다. 숨겨진 provider 상태를 단순 문자열로 변환해 전달하지 않는다.
 
 ## 3. 참고 문서

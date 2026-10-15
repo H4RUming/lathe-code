@@ -1,8 +1,9 @@
 # 기능 동등성 구현·검증·커밋 계획
 
 2026-10-15 설계 기준. 모든 단계는 아직 미구현이다.
-[기능 요구사항](features.md)의 LAT-* ID와 [확장 계약](extensions.md)의 X1–X8을 구현·검증에 연결한다.
+[기능 요구사항](features.md)의 LAT-* ID와 [확장 계약](extensions.md)의 X1–X9를 구현·검증에 연결한다.
 전체 구조는 [architecture.md](architecture.md), 모델 연결은 [providers.md](providers.md)를 따른다.
+[추론·Ultra](reasoning-and-ultra.md)와 [도구·MCP 제작](tools-and-mcp-authoring.md)의 상세 검증도 포함한다.
 
 ## 1. 변경과 커밋 규칙
 
@@ -28,12 +29,12 @@ API key·access token·개인 프로젝트·실제 대화는 fixture/커밋에 �
 | 단계 | 목표 | 선행 | 대표 요구사항 | 완료 게이트 |
 | --- | --- | --- | --- | --- |
 | M0 | 실행 구조·contract·기술 검증 | 설계 | CORE/CLI/UI 기반 | GUI+CLI mock 동일 engine, IPC/DB/runner/sandbox 검증 결과 |
-| M1 | 실제 단일 agent coding loop | M0 | CORE, TOOL-001~010, PERM | 읽기→수정→테스트→설명, 승인/취소/한도 |
+| M1 | 실제 단일 agent coding loop·검색 | M0 | CORE, TOOL-001~012, PERM, REASON 기반 | 코드/웹 탐색→수정→테스트→설명, 승인/취소/한도 |
 | M2 | 장기 사용 가능한 세션·변경 관리 | M1 | SESSION, CTX, GIT-001~005 | resume/fork/rewind/compaction, crash 복구 |
-| M3 | 요청한 모든 provider | M1, M2 | PROVIDER, TOOL-013~014 | 각 provider tool 왕복과 외부 endpoint 검증 |
-| M4 | 기존 설정·확장 자산 활용 | M1~M3 | MEM, 확장 X1~X4/X6 | 지침→skill→hook→MCP→LSP→plugin 전체 흐름 |
-| M5 | 병렬 agent·workflow | M2~M4 | TASK, X5/X7 | 제한된 child/team 실행, worktree, budget, resume/cancel |
-| M6 | 네이티브 작업 환경·자동화 | M2~M5 | UI/CLI, TOOL-011~014, CORE-008, TASK-008~009, GIT-006 | PTY·preview·side chat·goal·schedule·검색/연동 |
+| M3 | 요청한 모든 provider·추론 제어 | M1, M2 | PROVIDER, REASON-001/002/006/007 단일 agent, TOOL-013~014 | provider별 tool 왕복·native 옵션·Off/On·외부 endpoint |
+| M4 | 설정·확장·MCP 제작 | M1~M3 | MEM, MCP, 확장 X1~X4/X6/X9 | 기존 MCP 사용과 새 서버 제작→검증→등록→실제 사용 |
+| M5 | Ultra·병렬 agent·workflow | M2~M4 | TASK, REASON 전체, X5/X7 | 추론 활성 child/team, server queue/worktree/budget, resume/cancel |
+| M6 | 네이티브 작업 환경·자동화 | M2~M5 | UI/CLI, TOOL-013~014, CORE-008, TASK-008~009, GIT-006 | PTY·preview·side chat·goal·schedule·연동 |
 | M7 | 원격 실행·서비스/실험 기능 | 관련 기반 | INTEGRATION, X7/X8 | SSH/remote control/cloud·채널 등 각각 독립 검증 |
 
 M1을 완성해도 전체 Claude Code 기능 동등성 달성이라고 부르지 않는다.
@@ -60,15 +61,18 @@ GUI 창을 닫고 CLI로 다시 연결해 동일 mock 작업을 확인한다. �
 
 - 연결 설정·Keychain·환경 profile·URL prefix와 원격 인증.
 - OpenAI Responses와 OpenAI-compatible Chat(vLLM)의 첫 adapter, stream/tool 결과 왕복.
+- 선택 모델의 native 추론/Off·On capability와 요청 snapshot. Ultra UI는 M5 검증 전 미지원으로 표시.
 - ModelStep/ToolInvocation 상태 머신, cancellation·budget·질문/steering mailbox.
 - ToolBroker/PolicyEngine: 읽기·Manual/Accept edits/Plan/Don't ask, approval grant.
 - list/search/read와 ignore/encoding/output 한도.
+- URL fetch·독립 검색 backend 첫 구현, 출처/필터/한도/실패 계약. local LLM 검색 왕복을 함께 검증.
 - create/edit/patch/move/delete, precondition·intent journal·기본 snapshot/diff.
 - shell 실행·stdout/stderr·exit code·timeout·background task 기본 수명.
 - 결과 보고에서 실행 증거와 파일 변경을 연결.
 
 게이트: 같은 fixture 저장소의 실패 테스트를 OpenAI와 원격 vLLM에서 각각 조사→수정→검증한다.
 취소·승인 거절·파일 충돌·잘못된 tool JSON에서도 사용자 변경을 보존한다.
+검색 backend를 붙인 local 모델로 검색→본문 읽기→출처 있는 수정 근거를 확인한다(E2E-19 기본).
 
 ### M2 — 세션과 복구
 
@@ -90,11 +94,13 @@ shell 부수효과를 자동 복원했다고 표시하지 않으며 불명확한
 - Ollama NDJSON와 모델 옵션, local/LAN/external proxy.
 - 기타 실제 호환 서버 프리셋과 API flavor 선택; 호환되지 않는 서버는 adapter 계획 표시.
 - 모델 capability 진단·수동 override·사용량/비용 추정·turn 경계 모델 전환.
+- native effort/level/budget/mode와 local Off/On. 모델/API/server별 미지원 옵션·sampling 충돌·무시 가능성 진단.
 - typed 이미지/문서 attachment 전달. 미지원 vision/structured output의 명시적 처리.
 
 게이트: OpenAI/AI Studio/Vertex/Claude/vLLM/Ollama 각각 stream→tool→result→답변을 실제로 검증한다.
 키/서버가 없으면 fixture test만 통과한 상태와 live 검증 완료를 구분한다.
 추가 API flavor(Google Interactions, Vertex Express, vLLM Responses)는 별도 커밋/검증으로 추가한다.
+E2E-17과 추론 계약의 단일 agent 사례를 통과한다. 실제 Off를 지원하지 않는 모델은 명확히 비활성화한다.
 
 ### M4 — 설정과 확장
 
@@ -102,29 +108,38 @@ shell 부수효과를 자동 복원했다고 표시하지 않으며 불명확한
 - X2: skills/legacy commands, 인자·reference·동적 전처리·수동/자동 호출.
 - X3: hook lifecycle/command/HTTP, input mutation 재검증, 오류·취소·순환 방지.
 - X4: MCP stdio/Streamable HTTP/legacy SSE, tools/resources/prompts, OAuth/elicitation/cancel.
+- X4: ToolSearch/schema 지연 로드·revision 재검사, MCP 검색 backend와 builtin registry 연결.
+- X9: 자연어 MCP 설정·server scaffold·build/test·등록/활성화·진단/rollback. 사용자 출처 scope grant와 실행 증거 보존.
 - X6: plugin/marketplace manifest, source pin, 설치/비활성/업데이트/rollback.
 - X6: LSP process/capability, 진단/정의/참조와 patch broker를 통한 workspace edit.
 - M1의 승인 모드 확대: explicit bypass 및 별도 Auto reviewer. reviewer 검증 전 Auto 비활성.
 
 게이트: 실제 프로젝트 설정과 fixture plugin으로 skill→MCP→편집→hook→LSP 흐름을 두 provider에서 실행한다.
 unsupported 필드가 필요한 component는 실행하지 않고 명확히 표시한다.
+E2E-20/21에서 기존 서버 연결과 새 서버 제작을 실제 호출까지 완료한다. 위임 범위 내 단계별 재승인은 없고
+권한 확대·secret 부재·OAuth 상호작용을 필요한 경계에서만 기다린다. 실패한 업데이트는 정상 revision을 유지한다.
 
 ### M5 — 병렬 실행
 
 - X5: named subagent, isolated/forked context, model map, tool scope, memory, partial/resume.
 - worktree 생성/보존/정리, child task tree, 동시성·예산 예약·cancel propagation.
 - team task board/claim/message/종료, agent 메시지와 사용자 권한 출처 구분.
+- UltraCoordinator의 계획/조사/구현/독립 검토/검증 DAG, 역할별 reasoning/model snapshot.
+- 동일 serving resource 큐·coordinator 포함 요청 상한·root 예산 예약, 동시성 1과 병렬 서버 각각 검증.
+- Ultra UI/CLI의 역할·동시성·반복·시간/token/비용 조절, 단계 변경·partial 결과·실패/취소/복구.
 - X7: 조건·반복·fan-out/fan-in workflow와 durable 중간 결과.
 - X7: agent/prompt/mcp_tool hooks, 나머지 lifecycle와 task 이벤트 통합.
 
 게이트: 세 작업을 다른 worktree에서 실행하고 일부 실패·취소 뒤 결과를 합친다.
 부모보다 넓은 권한, 중복 claim, orphan process, dirty worktree 삭제가 없어야 한다.
+E2E-18과 추론 계약 전체를 통과한다. 동일 local 모델 Ultra와 명시적 혼합 모델 구성을 각각 검증하며,
+모델 요청 동시성 1에서도 교착 없이 역할 인계가 되어야 한다. 테스트 실행 증거와 agent 의견을 구분한다.
 
 ### M6 — 네이티브 생산성·자동화
 
 - PTY 완성·resize/input/attach, native diff comments/editor, context/usage inspector.
 - side chat, cross-session 메시지, 파일/이미지 mention, command palette·VoiceOver·IME.
-- URL fetch·독립 검색 adapter, PDF/notebook 입력과 관련 capability.
+- 검색 출처·도구 탐색·MCP 진단의 native 화면, PDF/notebook 입력과 관련 capability 완성.
 - preview server 수명/포트 연결, PR/CI 상태 조회·watch, 사용자 알림.
 - loop/goal/durable local schedule, timezone/DST·sleep·overlap·승인 대기·예산.
 - X7: plugin monitors/styles/themes 및 지원 가능한 mods bridge.
@@ -154,11 +169,14 @@ Claude의 전용 계정 서비스에 임의 provider key로 접속할 수 있다
 | 종류 | 핵심 경계 |
 | --- | --- |
 | Provider contract | byte 분할/UTF-8/JSON, 다중 tool, signature, incomplete/EOF/cancel |
+| Reasoning/Ultra | 실제 control payload, unsupported/ignored 옵션, 역할 인계, root budget, 공유 서버 큐, writer/취소/복구 |
 | Policy contract | deny/ask/allow, hook 인수 수정·재귀, 승인 hash, scope, child 권한, 잘못된 설정의 마지막 정상 revision, startup trust/Plan barrier |
 | Workspace | 경로·symlink/hardlink·대소문자·revision conflict·부분 patch |
 | Execution | pipe 폭주, PTY stdin/resize, child group timeout, detach/reconnect |
 | Recovery | journal intent/result crash injection, unknown 외부 효과, migration |
 | Extensions | import/profile/schema, hooks decision, MCP/LSP protocol, plugin lifecycle |
+| MCP authoring | scoped 위임, build/schema/protocol/agent 왕복, digest/lock 고정, 자동 활성화, grant 철회, rollback |
+| Search | code/web/tool 구분, 실제 근거·필터·quota·출력 제한·부분 실패, local 모델 backend 왕복 |
 | Native UI | IME/VoiceOver/키보드, 긴 transcript, 승인/질문, 창·작업 수명 |
 | Integration | HTTPS/auth/prefix, SSH disconnect, remote MCP, schedule overlap/misfire |
 

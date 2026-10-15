@@ -7,6 +7,8 @@
 - [기능 정의](features.md): 관찰 가능한 기능, 완료 기준, 공식 근거.
 - [확장 호환 계약](extensions.md): 설정·지침·Skills·Hooks·MCP·plugins·LSP.
 - [프로바이더 계약](providers.md): 서비스별 API, 인증, 외부 모델 서버.
+- [추론과 Ultra](reasoning-and-ultra.md): native 옵션, Off/On/Ultra, 역할·공유 예산·서버 큐.
+- [도구와 MCP 제작](tools-and-mcp-authoring.md): 검색·도구 registry, MCP 설정·제작·검증·활성화.
 - [구현 계획](roadmap.md): 단계별 기능/커밋/검증 게이트.
 
 첫 milestone은 전체 기능 동등성의 완료가 아니다. Skills·Hooks·MCP·서브에이전트·CLI·체크포인트·백그라운드 실행은 최종 제품의 필수 기능이다.
@@ -24,6 +26,8 @@
 | 수명 | GUI와 CLI가 동일한 Swift engine에 접속. 창을 닫아도 background 작업 유지 |
 | 저장 | SQLite WAL + 단일 writer actor, 큰 출력/스냅샷은 파일. wrapper는 M0 spike 후 고정 |
 | 모델 | API 어댑터·인증·capability 분리. 외부 vLLM/Ollama도 동일한 연결 모델 |
+| 추론·Ultra | provider 추론 제어와 다중 agent 실행을 분리. 로컬 모드 Off/On/Ultra는 검증된 두 축의 preset |
+| 검색·MCP | 모델과 독립적인 integration. 사용자가 맡긴 scope 안에서 MCP 제작·검증·활성화까지 자동 진행 |
 | Git | 시스템 git. GitHub는 준비된 gh 또는 별도 connector. 인수 배열·명시적 cwd 사용 |
 | 격리 | 승인 정책과 OS sandbox backend 분리. 검증 전에는 격리 완료로 표시하지 않음 |
 | 배포 | 개인 사용·GitHub 소스 제공. 바이너리 배포 시 서명/공증 |
@@ -66,6 +70,8 @@ flowchart TD
 | `EngineCoordinator` | client 접속, 세션/환경 registry, 전역 예산 |
 | `SessionActor` | 대화 revision, fork, 입력 mailbox, active run lease |
 | `RunCoordinator` | 모델→도구→검증 루프, retry/compaction/steering |
+| `UltraCoordinator` | 역할 DAG, child 결과 인계·독립 검토·수정 반복. 실행은 RunCoordinator/TaskSupervisor에 위임 |
+| `EndpointScheduler` | serving resource별 요청 lease·공정 큐·부하 제한, coordinator/child 요청 합산 |
 | `TaskSupervisor` | shell·subagent·workflow·monitor의 수명과 취소 |
 | `WorkspaceCoordinator` | canonical root, write lease, 변경 감지, checkpoint |
 | `PolicyEngine` | 유효 규칙, approval scope, policy revision |
@@ -108,6 +114,9 @@ App/CLI는 Protocol client에 의존한다. provider별 분기를 UI나 agent lo
 | Session | id, workspaceID, title, parent session/revision, instruction profile |
 | Turn | 사용자 입력 경계, checkpointID, typed attachments, 입력 출처 |
 | Run | turnID, attempt, model/permission snapshot, budget, state |
+| ReasoningPolicy | UI preset, provider native options, capability revision, 요청별 resolved control |
+| UltraPlan | root run, role DAG, role model map, child budgets, concurrency, iteration limit |
+| ServingResource | connection ID 묶음, capacity profile, queue policy. URL/모델 이름과 별개 |
 | ModelStep | request ID, provider snapshot, completion reason, continuation reference |
 | ToolInvocation | invocation ID, provider call mapping, tool ID, args hash, effects, state |
 | ApprovalGrant | request hash, scope, workspace/connection, policy revision, expiry |
@@ -116,6 +125,8 @@ App/CLI는 Protocol client에 의존한다. provider별 분기를 UI나 agent lo
 | ProviderContinuation | connection/model/API identity, opaque blocks, replay constraints |
 | MemoryEntry | scope, source, text, 사용자에게 보이는 revision |
 | ExtensionInstall | source/version/hash, scope, declared effects, compatibility report |
+| ExtensionChangePlan | source revision, 목표 config/code diff, runtime/dependency/network/effects, 검증 결과, 활성 revision |
+| ExtensionChangeAuthorization | 사용자 출처 ApprovalGrant의 scoped subtype. plan 범위·만료·철회·policy revision; agent가 발급 불가 |
 | Schedule | trigger/timezone, workspace, overlap/misfire policy, enabled |
 
 MessagePart는 text/attachment/tool-call/tool-result/summary를 구분한다. tool result는 call ID와 연결한다.
@@ -185,8 +196,13 @@ grant는 once/session/workspace 범위이며 바뀐 args/target/policy에 재사
 headless에 응답 client가 없으면 needsApproval/needsInput 결과로 종료한다.
 
 workspace 시작 순서는 discovery → 수동적 parse/검증 → trust/activation → executable startup이다.
-SessionStart/Setup hook, skill 전처리, 프로젝트 helper/MCP는 activation 전 실행하지 않는다.
-agent/hook/shell이 바꾼 실행 설정과 권한 확대는 pending revision이며 사용자가 명시적으로 수락해야 활성화된다.
+SessionStart/Setup hook, skill 전처리, 프로젝트 helper/MCP는 검증된 실행 허가 전 시작하지 않는다.
+MCP 제작/시험은 기존 ExtensionChangeAuthorization을 재검사해 제한된 staging 인스턴스를 임시 허가할 수 있다.
+이는 영속 registry 활성화와 별개이며 해당 시험 run 밖에 도구를 노출하지 않고 종료/취소 때 회수한다.
+agent/hook/shell의 실행 설정 변경은 먼저 pending revision이다. 사용자 출처의 `ExtensionChangeAuthorization` 안에서
+검증된 정확한 revision은 PolicyEngine 재검사 후 자동 활성화할 수 있다. grant는 설정 경로·runtime/dependency·
+접속 대상·도구 효과·시간/예산 범위를 고정하며, 사용자가 맡긴 MCP 설정/제작은 이 범위 안에서 계속 진행한다.
+기존 grant를 넘는 권한 확대·새 대상은 별도 사용자 결정이 필요하다. agent가 자신의 grant/deny/trust를 변경할 수 없다.
 approval DB·engine 설정/IPC 경로는 일반 file tool 쓰기 대상에서 제외하고 sandbox deny에도 반영한다. 비격리 same-user 프로세스까지 막는다고 주장하지 않는다.
 보안 설정 parse 실패 시 마지막 정상 revision을 유지하거나 관련 실행을 막는다. 최초 보안 설정이 깨졌다면 해당 workspace 실행을 보류한다.
 
@@ -227,6 +243,42 @@ adapter가 이력 재구성 후 continuation 재사용 가능성을 판단하고
 반복 압축 실패는 사용자에게 표시하고 무한 재시도하지 않는다.
 auto memory는 inspect/edit/delete/disable 가능한 저장소다. 출처·project scope·revision을 보존하며 권한/비밀 저장과 분리한다.
 private reasoning/서명은 다른 provider로 보내지 않는다. 전환 시 사용자가 선택한 context transfer를 기록한다.
+
+### 추론 정책과 Ultra 실행
+
+`ReasoningPolicyResolver`는 service/API flavor/model/server revision에 따라 native control을 정규화하고
+adapter에 전달한다. `reasoning enabled`, `native effort/level/budget`, `agent strategy`는 별도 필드다.
+Off/On은 일반 agent loop의 추론 설정이고 Ultra는 추론 활성 agent들의 역할 DAG다. 권한 모드는 이들과 독립적이다.
+미지원 Off/On을 prompt나 표시 옵션으로 흉내 내지 않는다. Always-on은 On/Ultra, non-reasoning은 Off만 가능한 식으로
+근거 있는 조합을 노출한다. 사용자 override와 실제로 검증한 capability를 구분한다.
+
+`UltraCoordinator`는 목표 분해→조사→구현→독립 검토/검증→종합을 관리한다. 기본안은 역할 5개, 모델 요청 동시성 1,
+공유 checkout writer 1이며 측정 후 조정한다. 논리 agent 수와 물리 요청 동시성은 다르다.
+서로 다른 연결도 같은 서버/GPU를 공유하면 ServingResource로 묶는다. EndpointScheduler는 모델 요청 중에만 lease를
+잡고 도구/사용자 입력 대기 때 해제한다. 자식 완료를 기다리는 부모가 서버 lease를 점유해 교착하지 않는다.
+서버 슬롯·예산 예약·workspace write lease를 기다리는 순서와 취소 해제를 명시한다. 요청 retry도 root 예산 안이다.
+child마다 지침/파일 근거/결과 artifact를 전달하며 opaque reasoning은 공유하지 않는다. 동일 checkout에는 writer 하나,
+병렬 writer는 worktree를 사용하고 통합 담당이 충돌을 확인한다. 검토 agent의 동의만으로 테스트 성공을 기록하지 않는다.
+역할/옵션/예산/queue 상태는 event에 남고, pause/cancel/crash 때 기존 TaskSupervisor와 journal을 사용한다.
+세부 기본값·복구·UI/CLI 옵션 계약은 [추론·Ultra 설계](reasoning-and-ultra.md)를 따른다.
+
+### 도구 registry와 MCP 제작
+
+`ToolRegistry`는 builtin·MCP tool의 identity/schema/effect/source revision을, `ToolSearch`는 필요한 도구의
+검색과 schema 지연 로드를 담당한다. skills는 별도 실행 자산이지만 같은 검색 화면에서 유형을 구분해 찾을 수 있다.
+`SearchService`/`FetchService`는 LatheTools의 port, HTTP/MCP/hosted backend는 주입하는 adapter다.
+검색 integration의 인증과 네트워크 정책은 모델 provider와 별도이며 code/web/tool 검색 결과 형식을 혼합하지 않는다.
+
+`MCPAuthoringService`는 LatheExtensions에서 ExtensionChangePlan을 만든다. 문서 조사·소스 생성·build/test도
+공통 RunCoordinator/ToolBroker/runner로 수행한다. 별도 셸 우회 통로를 만들지 않는다.
+`MCPManage`/`MCPAuthor`의 복합 호출은 orchestration intent와 grant를 검증·기록하되 workspace write lease를
+잡은 채 child tool을 기다리지 않는다. 실제 파일/설치/등록 leaf마다 필요한 lease를 얻고 해제하며 parent-child
+invocation을 journal에 연결한다. child도 현재 policy·grant를 재검사하고, 부분 실패를 전체 성공으로 처리하지 않는다.
+PolicyEngine이 사용자 출처 grant를 확인하고, MCP registry는 검증한 config/code digest와 runtime/dependency lock을
+활성 revision에 묶는다. 변경 시 revalidate→test→drain old calls→activate new instance 순서로 전환한다.
+실패하면 last-good을 유지하며, 외부 MCP 효과는 config rollback으로 되돌렸다고 표시하지 않는다.
+앱 engine은 Swift이며 제작하는 MCP 서버 runtime은 사용자가 허용한 설치 환경에 따라 선택한다.
+상세 stage·검증·자격 증명·취소 계약은 [도구·MCP 제작 설계](tools-and-mcp-authoring.md)를 따른다.
 
 ## 11. 영속성·이벤트·복구
 

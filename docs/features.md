@@ -70,7 +70,7 @@ L은 특정 회사 모델에만 붙는 기능으로 구현하지 않는다. P/I�
 | ID / 분류 | Lathe 요구사항 | 수용 기준 |
 | --- | --- | --- |
 | **LAT-TOOL-011 / L+I** URL 읽기 | 사용자가 지정하거나 검색으로 얻은 URL을 fetch하고 제목·본문·최종 URL·시각을 반환한다. HTML 본문 추출과 다운로드를 분리하고 인증·redirect 정책을 적용한다. | 문서 fetch 결과를 링크와 함께 인용할 수 있다. 로그인 벽·unsupported media·실패 응답을 실제 본문으로 오인하지 않는다. |
-| **LAT-TOOL-012 / L+P+I** 웹 검색 | provider hosted search와 독립 검색 서비스 adapter를 모두 수용한다. 검색 provider와 결과 출처를 표시하며 모델 provider와 별개로 설정한다. | local LLM에서도 검색 backend가 연결되면 검색→문서 읽기→출처 첨부가 된다. 검색 연결이 없으면 검색한 척하지 않고 연결 필요를 표시한다. |
+| **LAT-TOOL-012 / L+P+I** 웹 검색 | provider hosted search, 독립 검색 API, 자체 호스팅 검색, MCP 검색 adapter를 수용한다. 모델 연결과 별도로 backend·domain/기간 필터·결과 한도·출처를 설정한다. | local LLM에서도 검색→문서 읽기→출처 첨부가 된다. backend의 미지원 필터와 일부 실패를 표시하고 검색 연결이 없으면 검색한 척하지 않는다. |
 | **LAT-TOOL-013 / L+P** 이미지 | clipboard·drag/drop·파일 선택으로 이미지를 추가하고 미리보기·제거·크기 변환 정보를 보여준다. vision 모델에만 이미지 데이터를 전달한다. | 지원 모델에서 screenshot 기반 수정 요청을 실행한다. 미지원 모델 전환 시 이미지를 조용히 버리거나 base64를 text로 보내지 않는다. |
 | **LAT-TOOL-014 / L+P** 문서와 binary | PDF 페이지/텍스트, notebook, 일반 binary를 구분한다. 로컬 추출 결과와 모델이 실제 본 원본/이미지 범위를 명시한다. | 스캔 PDF에 텍스트가 없음을 감지한다. 일부 페이지만 처리했으면 전체 문서를 읽었다고 표시하지 않는다. |
 
@@ -221,6 +221,38 @@ Lathe 개발 저장소에서 모든 변경을 커밋하는 팀의 개발 규칙�
 
 참고 동작: Desktop은 editor·terminal·preview 등 작업 pane을 제공하며 개발 서버의 실제 화면을 작업에 연결한다. 세부 기능 제공 여부는 실행 interface·provider·모델·계정 조건에 따라 다르므로 Lathe도 기능별 검증 상태를 표시한다. [Desktop 작업 화면](https://code.claude.com/docs/en/desktop), [공식 feature availability](https://code.claude.com/docs/en/feature-availability)
 
+### 추론 단계와 Ultra
+
+사용자 추가 요구이며 [추론·Ultra 계약](reasoning-and-ultra.md)이 옵션 매핑과 실행 구조를 정의한다.
+추론 모드, agent 구성, 권한 모드는 독립적이다. Off에서도 일반 코딩 loop·검색·MCP는 사용할 수 있다.
+
+| ID / 분류 | Lathe 요구사항 | 수용 기준 |
+| --- | --- | --- |
+| **LAT-REASON-001 / L+P** 제공자 고유 제어 | OpenAI·Google AI Studio/Vertex·Claude의 모델/API별 effort·level·budget·mode 등 실제 옵션을 노출한다. | 지원 값·조합만 전송한다. 동일 서비스의 모든 모델에 같은 Off나 기본값을 가정하지 않는다. |
+| **LAT-REASON-002 / L+P** Off/On | 로컬·개인 서버의 추론 생성 제어를 Off/On으로 선택한다. 서버/template 설정과 근거를 보관한다. | hybrid·always-on·non-reasoning·unknown 모델을 구분한다. 출력 숨김, parser 설정, prompt만으로 Off 지원을 표시하지 않는다. |
+| **LAT-REASON-003 / L+P** Ultra 실행 | 추론 활성 coordinator·조사·구현·검토·검증 agent가 역할과 독립 context를 갖고 하나의 목표를 수행한다. | 실제 child run과 결과 인계가 존재한다. 단일 요청의 높은 effort나 답변 재생성을 Ultra 성공으로 처리하지 않는다. |
+| **LAT-REASON-004 / L** 구성·한도 | agent 수·역할별 모델/추론·최대 동시 요청·반복·시간·공유 token/비용 예산을 조절한다. | 자식 예약과 coordinator 사용량이 root 총량에 포함된다. 서버가 usage를 생략하면 보수적 예약과 확인 가능한 상한을 사용한다. |
+| **LAT-REASON-005 / L** 서버 부하·변경 충돌 | 동일 serving resource의 요청을 합산 제한하고, 공유 checkout 쓰기는 직렬화하며 병렬 writer는 worktree로 분리한다. | 서버 처리량이 1이어도 논리 다중 agent를 큐로 진행한다. 같은 서버를 다른 URL로 등록해도 지정된 resource group 상한이 유지된다. |
+| **LAT-REASON-006 / L** 중단·복구·전환 | task tree·결정된 옵션·예산·artifact를 기록한다. 단계 변경은 안전한 실행 경계에서 새 snapshot으로 적용한다. | Ultra 취소가 queued/running children에 전파되고 재시작 때 완료한 쓰기를 중복 실행하지 않는다. 한 child 실패와 전체 실패를 구분한다. |
+| **LAT-REASON-007 / L+P** 표시·진단 | 선택 단계·실제 요청 옵션·활성/대기 agent·서버 병목·usage·provider가 공개한 추론 요약을 구분한다. | raw private reasoning을 요구하거나 만들어 표시하지 않는다. endpoint가 옵션을 무시할 가능성/증거 부족을 verified로 숨기지 않는다. |
+| **LAT-REASON-008 / L** 모델 간 역할 분담 | 동일 local model로 Ultra를 실행하고, 사용자가 설정하면 역할별로 다른 local/remote/cloud 모델을 사용한다. | 지정한 연결 범위 안에서만 배정한다. 장애·작은 context를 이유로 코드를 임의 클라우드에 보내지 않고 private continuation을 다른 provider에 넘기지 않는다. |
+
+### 도구와 MCP 자동화
+
+[확장 계약](extensions.md)은 MCP wire/config 호환을, [검색·MCP 제작 계약](tools-and-mcp-authoring.md)은
+실제 도구 목록·설정/제작 흐름·실패 복구를 소유한다. 아래 기능도 최종 제품의 필수 범위다.
+
+| ID / 분류 | Lathe 요구사항 | 수용 기준 |
+| --- | --- | --- |
+| **LAT-MCP-001 / L+I** 전체 client | stdio·Streamable HTTP·legacy SSE, tools/resources/prompts, pagination/list 변경, progress/cancel/reconnect를 지원한다. | transport·protocol version·capability별 테스트와 지원 상태가 존재한다. SDK 설치만으로 최신 protocol 전체 지원을 표시하지 않는다. |
+| **LAT-MCP-002 / L** 도구 탐색 | 도구 이름·설명·schema·연결 상태를 검색하고 필요한 schema만 context에 로드한다. builtin/skill/MCP의 출처를 구분한다. | 많은 도구에서도 선택→schema load→call이 된다. schema/연결 revision이 바뀐 오래된 호출은 재검증한다. |
+| **LAT-MCP-003 / L+I** 인증·사용자 입력 | API key/header/env 참조, OAuth, elicitation, 실제 지원하는 roots/sampling 등을 제공한다. | secret은 Keychain 참조로 등록하고 모델·로그로 누출하지 않는다. capability별 입력·거절·만료·예산을 검증한다. |
+| **LAT-MCP-004 / L+I** 자동 설정 | 자연어 요청으로 기존 서버 조사→설정 계획→의존성/credential 확인→연결 시험→등록/활성화→실제 호출을 수행한다. | 승인된 scope 안에서는 매 단계 재승인 없이 완료한다. 누락 secret/OAuth 상호작용/권한 확대가 필요한 단계만 이유와 함께 기다린다. |
+| **LAT-MCP-005 / L** 서버 제작 | 필요한 도구의 입력·출력·효과를 정의하고 SDK template, 소스, dependency pin, 실행 설정, 사용 안내를 생성한다. | 실제 build 가능한 서버 산출물과 소유 경로가 남는다. Swift 앱 코어와 별도로 사용자가 허용한 Swift/TypeScript/Python 서버 runtime을 사용할 수 있다. |
+| **LAT-MCP-006 / L** 제작 검증 | schema/unit/protocol/실제 agent 왕복 검증을 통해 만든 서버를 사용한다. mock과 실제 연결 검증을 구분한다. | initialize→list→call→결과 활용과 실패/timeout/cancel을 통과해야 활성 검증 완료가 된다. destructive tool은 허용된 fixture 대상으로 검증한다. |
+| **LAT-MCP-007 / L+I** 유지·복구 | 서버 상태/로그/환경 진단, 수정·업데이트·재시험·reload·disable·이전 revision rollback을 제공한다. | 실패한 변경은 기존 정상 server/config를 유지한다. 불명확한 외부 부수효과는 자동 재호출/복원하지 않는다. |
+| **LAT-MCP-008 / L** 위임·활성화 경계 | 사용자 출처 grant로 설정 대상·runtime/dependency·network/effect 범위를 고정하고 검증된 revision을 활성화한다. | agent가 grant를 스스로 만들거나 deny를 바꾸지 못한다. Plan·grant 취소·범위 초과에서는 중지하고, grant 안의 MCP 제작/등록은 반복 승인 없이 이어진다. |
+
 ## 11. 외부/hosted 기능의 별도 계약
 
 참고 동작: Claude Code의 Remote Control은 로컬 실행을 원격 UI에서 제어하는 형태이고, cloud 실행은 별도 실행 환경이다. [Remote Control](https://code.claude.com/docs/en/remote-control), [cloud 실행](https://code.claude.com/docs/en/claude-code-on-the-web)
@@ -266,6 +298,11 @@ Lathe 개발 저장소에서 모든 변경을 커밋하는 팀의 개발 규칙�
 | **E2E-14 원격 작업** | LAT-INTEGRATION-002/003/006/008 | SSH 또는 hosted 실행→remote/mobile 관찰·승인→연결 단절→재연결→취소→결과 반입 |
 | **E2E-15 외부 자동화** | LAT-INTEGRATION-004/005/007 | 서명된 trigger→중복 억제→hosted run→결과 artifact→허용한 Slack/GitHub 알림→접근 해지 |
 | **E2E-16 화면·simulator** | LAT-INTEGRATION-001/009/010 | 대상 선택→권한 확인→화면 기반 조작/실행→검증 기록→사용자 중지·권한 회수 |
+| **E2E-17 추론 단계** | LAT-REASON-001/002/006/007 | native 옵션과 원격 vLLM/Ollama Off/On→실제 payload 검사→미지원/무시 옵션 표시→재개 시 snapshot 유지 |
+| **E2E-18 Ultra** | LAT-REASON-003~008, LAT-TASK-003~005 | 동일 local 모델의 역할 분담→서버 큐·공유 예산→단일 writer/별도 worktree→독립 검토/테스트→중간 실패·취소·재개 |
+| **E2E-19 독립 검색** | LAT-TOOL-001/011/012, LAT-MCP-002 | local 모델로 코드 검색·웹 검색·본문 읽기·도구 검색을 구분 수행→출처→backend 실패/필터 미지원 표시 |
+| **E2E-20 MCP 자동 설정** | LAT-MCP-001~004/007/008 | 자연어 연결 요청→인증 참조→실제 시험→허용 scope 등록/활성화→호출→연결 단절·token 만료·설정 rollback |
+| **E2E-21 MCP 자체 제작** | LAT-MCP-005~008 | 요구 분석→server scaffold→build→schema/protocol 테스트→등록→agent가 새 도구 사용→업데이트 실패 복구·grant 취소 |
 
 필수 연결의 범위는 OpenAI, AI Studio, Vertex, Claude, vLLM, Ollama다. “기타 호환 서버”는 이름만 추가하는 대신 버전·모델·API flavor를 명시한 최소 한 개의 실제 추가 서버 fixture/smoke test를 남긴다. vision 등 P 기능은 지원 조합에서 시험하고 미지원 조합에서는 정확한 unavailable 동작을 시험한다.
 
