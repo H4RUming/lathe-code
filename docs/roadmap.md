@@ -1,6 +1,7 @@
 # 기능 동등성 구현·검증·커밋 계획
 
-2026-10-15 설계 기준. 모든 단계는 아직 미구현이다.
+2026-10-15 기준. **M0의 앱·공통 엔진·CLI·저장소 수직 흐름을 구현했으며 M0 전체는 진행 중이다.**
+현재 실행 방법과 검증 범위는 [개발 가이드](development.md)를 따른다. M1 이후는 미구현이다.
 [기능 요구사항](features.md)의 LAT-* ID와 [확장 계약](extensions.md)의 X1–X9를 구현·검증에 연결한다.
 전체 구조는 [architecture.md](architecture.md), 모델 연결은 [providers.md](providers.md)를 따른다.
 [추론·Ultra](reasoning-and-ultra.md)와 [도구·MCP 제작](tools-and-mcp-authoring.md)의 상세 검증도 포함한다.
@@ -46,6 +47,12 @@ M0~M6는 로컬 코딩 에이전트와 네이티브 사용 흐름의 완성 범�
 ## 3. 커밋 가능한 작업 묶음
 
 ### M0 — 실행 기반
+
+첫 구현 범위: SwiftUI/AppKit 앱·공통 client·별도 engine·CLI, versioned Unix IPC,
+SQLite WAL journal, mock 스트리밍·취소·재접속·crash recovery, package tests와 macOS CI 정의.
+이벤트 전달은 cursor 기반 polling이며 persistent subscription은 후속이다.
+blob store, runner/PTY·자식 취소, sandbox backend, LLDB-DAP spike는 아직 남아 있다.
+최소 OS 실행과 GitHub Actions 원격 실행 결과는 로컬 빌드 성공과 별도로 확인한다.
 
 - Xcode 앱·로컬 Package·Swift 6 설정, 최소 UI/mock provider, macOS CI build.
 - Domain IDs/events/tool schemas, versioned IPC command/event 계약.
@@ -208,6 +215,7 @@ Claude와 Lathe 차등 검증은 사용자 동작·설정 계약을 비교하며
 
 ## 5. 다음 구현 단위
 
-현재 요청은 기능·구조 설계다. 다음 실제 구현은 M0의 Swift 앱/engine/CLI skeleton과
-mock provider를 통한 attach→stream→cancel→reconnect 수직 흐름을 권장한다.
-이것을 먼저 검증하면 이후 기능이 UI 수명이나 특정 모델 API에 묶이는 문제를 피할 수 있다.
+Swift 앱/engine/CLI의 mock attach→stream→cancel→reconnect 흐름 다음은 M0의
+runner pipe·process group 취소·PTY·sandbox·LLDB-DAP 기술 검증이다. 실패/미지원 결과와
+backend 선택을 기록한 뒤 M1의 실제 provider와 ToolBroker를 연결한다.
+실제 모델이나 도구 실행이 없는 현재 상태를 coding loop 완료로 표시하지 않는다.

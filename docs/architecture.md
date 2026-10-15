@@ -1,6 +1,11 @@
 # Lathe 상세 아키텍처
 
-설계 기준일: 2026-10-15. 상태: 제안/미구현. 목표는 Swift 네이티브 macOS 앱에서 Claude Code와 동등한 작업 흐름을 제공하고 여러 모델 프로바이더를 선택하는 것이다.
+설계 기준일: 2026-10-15. 상태: **목표 아키텍처, M0 일부 구현**. 목표는 Swift 네이티브 macOS 앱에서 Claude Code와 동등한 작업 흐름을 제공하고 여러 모델 프로바이더를 선택하는 것이다.
+
+현재는 `LatheDomain`·`LatheProtocol`·`LathePersistence`·`LatheRuntime`·`LatheEngine`·`LatheCLI`와
+SwiftUI/AppKit 앱이 구현되어 있다. `EngineRuntime` actor가 SQLite C API wrapper를 단독 소유하며
+1 MiB framed JSON-RPC와 cursor polling으로 mock 작업을 공유한다. 아래의 ToolBroker, provider,
+세부 coordinator, runner, blob store 등은 후속 목표다. 실제 계약·검증 범위는 [개발 가이드](development.md)에 기록한다.
 
 ## 1. 기준과 문서 경계
 

@@ -1,0 +1,41 @@
+name: macOS
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: macos-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Toolchain
+        run: |
+          xcodebuild -version
+          swift --version
+      - name: Package tests
+        run: swift test --package-path Packages/LatheKit --scratch-path .build/ci-tests
+      - name: Native app state regression tests
+        run: swift test --package-path Apps/Lathe --scratch-path .build/ci-app-tests
+      - name: Build native app and CLI
+        run: Scripts/build-app.sh
+      - name: Engine and CLI integration smoke
+        run: python3 Scripts/smoke-engine.py --bin-dir .build/macos
+      - name: Package development app
+        run: ditto -c -k --sequesterRsrc --keepParent .build/macos/Lathe.app .build/macos/Lathe.app.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Lathe-macOS-development
+          path: |
+            .build/macos/Lathe.app.zip
+            .build/macos/lathe
+            .build/macos/lathe-engine
+          if-no-files-found: error

@@ -1,0 +1,311 @@
+import AppKit
+import Combine
+import Foundation
+import LatheDomain
+import LatheProtocol
+
+protocol AppEngineClient: Sendable {
+    func connect() async throws -> EngineInfo
+    func listSessions() async throws -> [SessionSnapshot]
+    func session(id: UUID, beforeRunID: UUID?, limit: Int) async throws -> SessionSnapshot
+    func createSession(title: String, workspacePath: String) async throws -> SessionSnapshot
+    func submit(sessionID: UUID, prompt: String, requestID: UUID) async throws -> RunSnapshot
+    func cancel(runID: UUID) async throws -> RunSnapshot
+    func events(after: Int64, sessionID: UUID?, runID: UUID?, limit: Int) async throws -> EventPage
+}
+
+extension EngineClient: AppEngineClient {}
+
+@MainActor
+final class LatheAppModel: ObservableObject {
+    static let promptByteLimit = 32 * 1_024
+    @Published private(set) var sessions: [SessionSnapshot] = []
+    @Published private(set) var selectedSessionID: UUID?
+    @Published private(set) var selectedSession: SessionSnapshot?
+    @Published private(set) var engineInfo: EngineInfo?
+    @Published private(set) var isConnected = false
+    @Published private(set) var isConnecting = false
+    @Published private(set) var isCreatingSession = false
+    @Published private(set) var isSubmitting = false
+    @Published private(set) var isCancelling = false
+    @Published private(set) var isLoadingEarlier = false
+    @Published private(set) var earlierCursor: UUID?
+    @Published var draft = ""
+    @Published var errorMessage: String?
+
+    private var client: (any AppEngineClient)?
+    private var connectionTask: Task<Void, Never>?
+    private var pollTask: Task<Void, Never>?
+    private var connectionGeneration: UInt64 = 0
+    private var selectionGeneration: UInt64 = 0
+    private var cursor: Int64 = 0
+    private var drafts: [UUID: String] = [:]
+    private(set) var dataDirectory: URL?
+
+    init(client: (any AppEngineClient)? = nil) {
+        self.client = client
+    }
+
+    var draftByteCount: Int { draft.utf8.count }
+    var isDraftOverLimit: Bool { draftByteCount > Self.promptByteLimit }
+
+    var canSubmit: Bool {
+        isConnected && selectedSession != nil && selectedSession?.activeRun == nil
+            && !isSubmitting && !isDraftOverLimit && !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    var connectionLabel: String {
+        if isConnecting { return "엔진에 연결하는 중" }
+        return isConnected ? "로컬 엔진 연결됨" : "엔진 연결 끊김"
+    }
+
+    func ensureConnected() async {
+        guard !isConnected else { return }
+        await connect()
+    }
+
+    func connect() async {
+        if let connectionTask { await connectionTask.value; return }
+        // Window .task cancellation must not cancel the connection shared by other windows.
+        let task = Task { [weak self] in
+            guard let self else { return }
+            await self.performConnect()
+        }
+        connectionTask = task
+        await task.value
+    }
+
+    private func performConnect() async {
+        isConnecting = true
+        isConnected = false
+        errorMessage = nil
+        pollTask?.cancel()
+        connectionGeneration &+= 1
+        let generation = connectionGeneration
+        defer {
+            if generation == connectionGeneration { isConnecting = false }
+            connectionTask = nil
+        }
+        do {
+            if client == nil {
+                let override = ProcessInfo.processInfo.environment["LATHE_DATA_DIR"]
+                    .flatMap { $0.isEmpty ? nil : URL(fileURLWithPath: $0, isDirectory: true) }
+                let paths = try EnginePaths(root: override)
+                dataDirectory = paths.directory
+                let helper = Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/lathe-engine")
+                client = EngineClient(paths: paths, executableURL: helper)
+            }
+            guard let client else { return }
+            let info = try await client.connect()
+            let latest = try await client.listSessions()
+            guard generation == connectionGeneration, !Task.isCancelled else { return }
+            engineInfo = info
+            sessions = latest
+            isConnected = true
+            if let selectedSessionID, latest.contains(where: { $0.id == selectedSessionID }) {
+                try await refreshSelectedSession(using: client)
+            } else if let first = latest.first {
+                prepareSelection(first.id)
+                try await refreshSelectedSession(using: client)
+            } else {
+                prepareSelection(nil)
+            }
+            guard isConnected, generation == connectionGeneration else { return }
+            startPolling(using: client, generation: generation)
+        } catch {
+            guard generation == connectionGeneration else { return }
+            isConnected = false
+            errorMessage = "엔진에 연결하지 못했습니다. \(error.localizedDescription)"
+        }
+    }
+
+    func selectSession(_ id: UUID?) {
+        prepareSelection(id)
+        guard let client, id != nil else { return }
+        let generation = selectionGeneration
+        Task {
+            do { try await refreshSelectedSession(using: client) }
+            catch {
+                guard generation == selectionGeneration else { return }
+                disconnectAfterFailure("세션을 읽지 못했습니다. 다시 연결해 상태를 확인하세요.", error: error)
+            }
+        }
+    }
+
+    private func prepareSelection(_ id: UUID?) {
+        if let selectedSessionID { drafts[selectedSessionID] = draft }
+        selectionGeneration &+= 1
+        selectedSessionID = id
+        selectedSession = nil
+        earlierCursor = nil
+        isLoadingEarlier = false
+        draft = id.flatMap { drafts[$0] } ?? ""
+    }
+
+    func chooseProject() {
+        let panel = NSOpenPanel()
+        panel.title = "Lathe에서 작업할 프로젝트 선택"
+        panel.prompt = "프로젝트 열기"
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.canCreateDirectories = false
+        panel.begin { [weak self] response in
+            guard response == .OK, let directory = panel.url else { return }
+            Task { @MainActor [weak self] in await self?.createSession(in: directory) }
+        }
+    }
+
+    func newSession() {
+        guard let selectedSession else { chooseProject(); return }
+        let directory = URL(fileURLWithPath: selectedSession.workspacePath, isDirectory: true)
+        Task { await createSession(in: directory) }
+    }
+
+    func sendPrompt() {
+        guard canSubmit, let client, let sessionID = selectedSessionID else { return }
+        let prompt = draft
+        let requestID = UUID()
+        isSubmitting = true
+        errorMessage = nil
+        Task {
+            defer { isSubmitting = false }
+            do {
+                _ = try await client.submit(sessionID: sessionID, prompt: prompt, requestID: requestID)
+            } catch {
+                if let failure = error as? RPCFailure,
+                   [-32600, -32601, -32602, -32004, -32009].contains(failure.code) {
+                    errorMessage = "요청이 거절되었습니다. \(failure.localizedDescription)"
+                } else {
+                    disconnectAfterFailure("요청 결과를 확인하지 못했습니다. 다시 연결해 세션 상태를 확인하세요.", error: error)
+                }
+                return
+            }
+            if drafts[sessionID] == prompt { drafts[sessionID] = "" }
+            if selectedSessionID == sessionID, draft == prompt { draft = "" }
+            do {
+                try await refreshSessions(using: client)
+                try await refreshSelectedSession(using: client)
+            } catch {
+                disconnectAfterFailure("요청은 접수되었지만 상태를 읽지 못했습니다. 다시 연결해 확인하세요.", error: error)
+            }
+        }
+    }
+
+    func loadEarlierRuns() {
+        guard let client, let id = selectedSessionID, let before = earlierCursor, !isLoadingEarlier else { return }
+        let generation = selectionGeneration
+        isLoadingEarlier = true
+        Task {
+            defer { if generation == selectionGeneration { isLoadingEarlier = false } }
+            do {
+                let page = try await client.session(id: id, beforeRunID: before, limit: 4)
+                guard generation == selectionGeneration, var current = selectedSession else { return }
+                current.runs = mergedRuns(older: page.runs, newer: current.runs)
+                selectedSession = current
+                earlierCursor = page.nextBeforeRunID
+            } catch {
+                guard generation == selectionGeneration else { return }
+                errorMessage = "이전 대화를 읽지 못했습니다. \(error.localizedDescription)"
+            }
+        }
+    }
+
+    func stopRun() {
+        guard let client, let run = selectedSession?.activeRun, !isCancelling else { return }
+        isCancelling = true
+        Task {
+            defer { isCancelling = false }
+            do {
+                _ = try await client.cancel(runID: run.id)
+                try await refreshSelectedSession(using: client)
+            } catch {
+                errorMessage = "중단 상태를 확인하지 못했습니다. \(error.localizedDescription)"
+            }
+        }
+    }
+
+    private func createSession(in directory: URL) async {
+        guard let client, isConnected, !isCreatingSession else { return }
+        isCreatingSession = true
+        errorMessage = nil
+        defer { isCreatingSession = false }
+        do {
+            let session = try await client.createSession(title: directory.lastPathComponent, workspacePath: directory.path)
+            try await refreshSessions(using: client)
+            selectSession(session.id)
+        } catch {
+            errorMessage = "세션을 만들지 못했습니다. \(error.localizedDescription)"
+        }
+    }
+
+    private func refreshSessions(using client: any AppEngineClient) async throws {
+        sessions = try await client.listSessions()
+    }
+
+    private func refreshSelectedSession(using client: any AppEngineClient) async throws {
+        guard let id = selectedSessionID else { return }
+        let generation = selectionGeneration
+        do {
+            var snapshot = try await client.session(id: id, beforeRunID: nil, limit: 4)
+            guard generation == selectionGeneration, id == selectedSessionID else { return }
+            if let previous = selectedSession {
+                guard snapshot.updatedAt >= previous.updatedAt else { return }
+                if snapshot.totalRunCount - previous.totalRunCount > snapshot.runs.count {
+                    // A disconnected client may have missed more than one page.
+                    // Keep a contiguous latest window so older paging has no gaps.
+                    earlierCursor = snapshot.nextBeforeRunID
+                } else {
+                    snapshot.runs = mergedRuns(older: previous.runs, newer: snapshot.runs)
+                }
+            } else {
+                earlierCursor = snapshot.nextBeforeRunID
+            }
+            selectedSession = snapshot
+        } catch {
+            guard generation == selectionGeneration else { return }
+            throw error
+        }
+    }
+
+    private func mergedRuns(older: [RunSnapshot], newer: [RunSnapshot]) -> [RunSnapshot] {
+        var indexed = Dictionary(uniqueKeysWithValues: older.map { ($0.id, $0) })
+        for run in newer { indexed[run.id] = run }
+        return indexed.values.sorted {
+            if $0.startedAt != $1.startedAt { return $0.startedAt < $1.startedAt }
+            return $0.id.uuidString < $1.id.uuidString
+        }
+    }
+
+    private func disconnectAfterFailure(_ message: String, error: Error) {
+        isConnected = false
+        pollTask?.cancel()
+        errorMessage = "\(message) \(error.localizedDescription)"
+    }
+
+    private func startPolling(using client: any AppEngineClient, generation: UInt64) {
+        pollTask = Task { [weak self] in
+            while !Task.isCancelled {
+                guard let self, self.connectionGeneration == generation else { return }
+                do {
+                    let page = try await client.events(after: self.cursor, sessionID: nil, runID: nil, limit: 256)
+                    guard !Task.isCancelled, self.connectionGeneration == generation else { return }
+                    if !page.events.isEmpty {
+                        try await self.refreshSessions(using: client)
+                        try await self.refreshSelectedSession(using: client)
+                    }
+                    guard !Task.isCancelled, self.connectionGeneration == generation else { return }
+                    self.cursor = page.nextCursor
+                    try await Task.sleep(for: .milliseconds(200))
+                } catch is CancellationError {
+                    return
+                } catch {
+                    guard self.connectionGeneration == generation else { return }
+                    self.isConnected = false
+                    self.errorMessage = "연결이 끊겼습니다. 실행은 엔진에서 계속될 수 있습니다. 다시 연결해 상태를 확인하세요. \(error.localizedDescription)"
+                    return
+                }
+            }
+        }
+    }
+}

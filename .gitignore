@@ -60,3 +60,13 @@ fastlane/report.xml
 fastlane/Preview.html
 fastlane/screenshots/**/*.png
 fastlane/test_output
+
+# Lathe local build and runtime data
+.DS_Store
+DerivedData/
+.swiftpm/
+*.xcuserstate
+.lathe/settings.local.json
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
