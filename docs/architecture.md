@@ -1,234 +1,316 @@
-# Lathe 아키텍처 초안
+# Lathe 상세 아키텍처
 
-작성: 2026-10-15. 구현 전 검토용이며, 아래 기술 선택은 확정 요구사항과 구분한다.
+설계 기준일: 2026-10-15. 상태: 제안/미구현. 목표는 Swift 네이티브 macOS 앱에서 Claude Code와 동등한 작업 흐름을 제공하고 여러 모델 프로바이더를 선택하는 것이다.
 
-## 1. 목표와 범위
+## 1. 기준과 문서 경계
 
-사용자의 프로젝트를 읽고, 변경을 제안·적용하고, 명령과 테스트를 실행하는 Swift 기반 macOS 코딩 에이전트다.
+- [기능 정의](features.md): 관찰 가능한 기능, 완료 기준, 공식 근거.
+- [확장 호환 계약](extensions.md): 설정·지침·Skills·Hooks·MCP·plugins·LSP.
+- [프로바이더 계약](providers.md): 서비스별 API, 인증, 외부 모델 서버.
+- [구현 계획](roadmap.md): 단계별 기능/커밋/검증 게이트.
 
-확정 요구사항:
+첫 milestone은 전체 기능 동등성의 완료가 아니다. Skills·Hooks·MCP·서브에이전트·CLI·체크포인트·백그라운드 실행은 최종 제품의 필수 기능이다.
+공식 CLI와 Desktop도 기능 가용성이 다르므로 기준일·표면·조건을 기능별로 기록한다. 외부 서비스 기능과 실험 기능도 별도 요구사항으로 추적한다.
+같은 작업·설정 계약을 제공하더라도 선택 모델의 판단·코드 품질·성공률까지 동일하다고 보장하지 않는다.
 
-- Swift 기반 macOS 네이티브 앱.
-- 개인용으로 개발하고 GitHub로 제공. 기능 구현마다 검증 후 커밋하고 GitHub에 반영.
-- OpenAI, Google AI Studio, Vertex AI, Anthropic Claude, vLLM, Ollama 및 기타 로컬 서빙 방식 지원.
-- vLLM·Ollama 등의 서버 주소는 localhost, LAN, 외부 도메인 모두 지원.
+## 2. 핵심 결정
 
-초기 기술 선택 제안:
-
-- macOS 15 이상, Swift 6 언어 모드, SwiftUI + 필요한 부분의 AppKit.
-- GitHub 소스 빌드를 우선. 바이너리 릴리스가 필요할 때 서명·공증·업데이트를 설계.
-- 한 작업 폴더에 동시에 실행되는 에이전트는 하나. 여러 세션을 저장하되 쓰기 경쟁을 먼저 방지.
-- 모델 호출은 선택한 서버에서, 파일·Git·명령 실행은 선택한 Mac 작업 폴더에서 수행.
-- 초기는 텍스트와 도구 호출 중심. 모델 설치·서버 시작·원격 SSH 실행·멀티 에이전트·MCP·완전한 IDE/PTY는 후속 범위.
-
-최소 macOS 버전은 사용할 API와 테스트 범위를 결정한다. 최신 Xcode 버전과 최소 실행 OS 버전은 별개다.
-원격 모델 서버의 OS/GPU 조건도 앱의 최소 버전과 별개다. 15 이상은 현재 제안이며 실제 사용할 Mac에 맞춰 조정할 수 있다.
-
-## 2. 사용 흐름과 화면
-
-프로젝트 열기 → 연결/모델 선택 → 요청 → 파일 탐색 → 변경 검토·적용 → 명령/테스트 → 결과와 diff 확인.
-
-| 화면 | 역할 |
+| 결정 | 제안과 이유 |
 | --- | --- |
-| 왼쪽 사이드바 | 프로젝트, 프로젝트별 세션, 실행 상태 |
-| 중앙 대화 | 사용자 요청, 스트리밍 답변, 도구 실행 카드, 승인, 중지·재시도 |
-| 오른쪽 상세 | 관련 파일, 변경 파일 목록, 읽기 전용 unified diff |
-| 아래 실행 패널 | 명령, 작업 경로, stdout/stderr, 종료 코드 |
-| 설정 | 연결 목록, 자격 증명, 모델 프로필, 연결 진단 |
+| 실행 코어 | Swift 자체 구현. 특정 Claude 실행 파일이나 특정 제공자 Agent SDK를 필수 코어로 사용하지 않음 |
+| UI | SwiftUI + AppKit. 대화·설정은 SwiftUI, 긴 코드/로그/diff/PTY는 AppKit 컴포넌트 |
+| OS/언어 | macOS 15 이상 제안, Swift 6 언어 모드. 최신 SDK 빌드와 최소 OS 검증은 별도 |
+| 빌드 | Xcode 앱 target + 하나의 로컬 Swift Package |
+| 수명 | GUI와 CLI가 동일한 Swift engine에 접속. 창을 닫아도 background 작업 유지 |
+| 저장 | SQLite WAL + 단일 writer actor, 큰 출력/스냅샷은 파일. wrapper는 M0 spike 후 고정 |
+| 모델 | API 어댑터·인증·capability 분리. 외부 vLLM/Ollama도 동일한 연결 모델 |
+| Git | 시스템 git. GitHub는 준비된 gh 또는 별도 connector. 인수 배열·명시적 cwd 사용 |
+| 격리 | 승인 정책과 OS sandbox backend 분리. 검증 전에는 격리 완료로 표시하지 않음 |
+| 배포 | 개인 사용·GitHub 소스 제공. 바이너리 배포 시 서명/공증 |
 
-SwiftUI로 창·탐색·설정을 구성하고, 코드·로그·diff는 필요할 때 AppKit 텍스트 뷰를 연결한다.
-처음부터 자체 코드 에디터 전체를 만들기보다 파일 열기와 변경 검토를 완성한다.
+`ModelConnection`, `ExecutionEnvironment`, `IntegrationService`를 독립 축으로 둔다.
+외부 vLLM + Mac 프로젝트, OpenAI + SSH 프로젝트, Mac Ollama + Mac 프로젝트를 같은 런타임이 다룬다.
+원격 모델 endpoint를 등록하는 행위는 그 서버에서 파일이나 shell을 실행할 권한을 만들지 않는다.
 
-## 3. 구성과 의존성
+## 3. 프로세스와 수명
 
 ```mermaid
 flowchart TD
-    UI[SwiftUI / AppKit] --> Core[AgentSession / Context / Policy]
-    Core --> Provider[ModelProvider protocol]
-    Provider --> OpenAI[OpenAI Responses]
-    Provider --> Google[Gemini GenerateContent]
-    Google --> Studio[Google AI Studio connection]
-    Google --> Vertex[Vertex connection]
-    Provider --> Claude[Anthropic Messages]
-    Provider --> Compatible[OpenAI Compatible Chat]
-    Compatible --> Servers[vLLM / other compatible servers]
-    Provider --> Ollama[Ollama Chat]
-    Core --> Tools[Workspace / Patch / Command / Git]
-    Core --> Store[SessionStore protocol]
-    Tools --> Mac[Selected Mac workspace]
-    Store --> DB[SQLite + output files]
+    App[Lathe.app / SwiftUI + AppKit] --> IPC[Versioned local IPC]
+    CLI[lathe CLI / headless] --> IPC
+    IPC --> Engine[LatheEngine / Swift]
+    Engine --> Runtime[Session / Run / Task orchestration]
+    Runtime --> Context[Instructions / Memory / Context]
+    Runtime --> Providers[Model adapters / Credentials]
+    Runtime --> Broker[ToolBroker / Policy / Hooks]
+    Runtime --> Journal[SQLite journal + blobs]
+    Broker --> Files[Files / Patch / Checkpoints / Git]
+    Broker --> Runner[LatheRunner / Shell / PTY / Sandbox]
+    Broker --> Ext[MCP / LSP / Plugins / Web]
+    Broker --> Remote[SSH executor]
 ```
 
-하나의 Xcode 앱과 하나의 로컬 Swift Package로 시작한다. 처음부터 여러 저장소나 서비스로 분할하지 않는다.
+- `LatheEngine`은 사용자 단위 작업 관리자/DB writer다. 앱과 CLI가 서로 다른 세션 DB를 만들지 않는다.
+- client가 engine을 시작하고 version handshake 후 연결한다. 초기 UI 개발은 동일 interface의 in-process mock을 사용 가능하다.
+- 동시 시작은 사용자별 bootstrap lock으로 직렬화한다. 기존 socket/owner를 확인하고 살아 있는 engine에 attach하며, stale socket은 owner 종료 확인 뒤 정리한다.
+- migration도 별도 독점 lock 안에서 수행한다. 다른 버전의 engine이 실행 중이면 두 번째 writer를 만들지 않고 호환 오류를 반환한다.
+- 기본 IPC는 사용자 전용 Unix domain socket + 길이 프레이밍한 JSON-RPC 2.0이다. socket 경로 길이·runtime directory 권한·peer UID를 검증한다.
+- 이 IPC 인증을 같은 사용자 권한의 악성 프로세스에 대한 OS 격리로 주장하지 않는다.
+- request ID, session/run ID, protocol version, last event sequence를 전달한다. 버전 불일치 시 임의 해석하지 않는다.
+- client 명령은 submit/resume/fork/steer/cancel/approve/respond/list/subscribe다. UI와 CLI가 file tool을 직접 우회 호출하지 않는다.
+- 창 닫기는 detach다. 명시적 앱 종료는 작업 중단 또는 background 유지 선택을 적용한다. headless는 기본 attach, 명시적 detach 시 조회 ID를 반환한다.
+- 스케줄을 사용하지 않으면 로그인 시 daemon을 자동 등록하지 않는다. durable 스케줄 단계에서 opt-in launch agent를 추가한다.
 
-| 구성 | 책임 |
+| Actor | 소유 상태 |
 | --- | --- |
-| `LatheApp` | SwiftUI/AppKit, ViewModel, 의존성 조립 |
-| `LatheCore` | 도메인 타입, 실행 상태 머신, 컨텍스트·권한 정책, provider/tool/store 프로토콜 |
-| `LatheProviders` | 인증, 엔드포인트 조립, HTTP, SSE/NDJSON, 각 API 변환 |
-| `LatheWorkspace` | 파일 탐색·읽기, 패치, 명령 실행, Git 조회 |
-| `LathePersistence` | SQLite 저장, 마이그레이션, 실행 기록·출력 파일 |
+| `EngineCoordinator` | client 접속, 세션/환경 registry, 전역 예산 |
+| `SessionActor` | 대화 revision, fork, 입력 mailbox, active run lease |
+| `RunCoordinator` | 모델→도구→검증 루프, retry/compaction/steering |
+| `TaskSupervisor` | shell·subagent·workflow·monitor의 수명과 취소 |
+| `WorkspaceCoordinator` | canonical root, write lease, 변경 감지, checkpoint |
+| `PolicyEngine` | 유효 규칙, approval scope, policy revision |
+| `CredentialBroker` | Keychain, helper/OAuth token 갱신 및 합치기 |
+| `StoreActor` | 트랜잭션, event sequence, 조회 projection, migration |
 
-인프라 모듈은 Core에 의존한다. Core는 UI나 특정 제공자 DTO에 의존하지 않는다.
-UI 상태만 `@MainActor`에서 갱신하고, `AgentSession` actor가 실행 상태를 소유한다.
-네트워크와 프로세스 수명은 View 생성·소멸에 묶지 않는다.
+UI projection만 `@MainActor`다. actor가 await 후 재진입할 때 run generation·lease·policy revision을 다시 확인한다.
 
-## 4. 프로바이더 설계
+## 4. 모듈과 의존성
 
-서비스 이름, API 형식, 서버 위치, 모델 능력을 별도 개념으로 둔다.
-
-| 사용자에게 보이는 연결 | 초기 API 어댑터 | 인증/설정 |
-| --- | --- | --- |
-| OpenAI | `OpenAIResponsesProvider` | API key, model ID |
-| Google AI Studio | `GeminiGenerateContentProvider` | Gemini Developer API key, model ID |
-| Vertex AI | 같은 Gemini codec + Vertex 연결 계층 | project, location, model ID, gcloud ADC token helper |
-| Anthropic Claude | `AnthropicMessagesProvider` | API key, model ID, API version |
-| vLLM | `OpenAICompatibleChatProvider` | 사용자 URL, 필요시 Bearer/custom header |
-| Ollama | `OllamaChatProvider` | 사용자 URL, 필요시 proxy 인증 |
-| 기타 서버 | 지원하는 API 형식으로 연결 | 사용자 URL, 인증, 모델·호환성 옵션 |
-
-초기 구현은 다섯 가지 API 어댑터다. Vertex와 AI Studio의 endpoint/auth는 분리하되 Gemini 콘텐츠 변환을 공유한다.
-vLLM은 Chat Completions 프리셋부터 검증하고 Responses 사용은 후속 호환성 검증을 거친다.
-Ollama는 native `/api/chat`을 기본으로 하며, 일반 OpenAI-compatible 연결도 별도 선택할 수 있다.
-기타 서버는 실제 제공하는 API가 호환될 때 기존 어댑터를 사용한다. 임의의 모델 런타임을 자동으로 지원한다고 표시하지 않는다.
-
-Google의 Interactions와 GenerateContent는 다른 wire format이다. 초기에는 Vertex와 공유하기 쉬운 GenerateContent를 명시적으로 선택한다.
-Interactions를 추가할 때 별도 API flavor와 codec을 둔다. Vertex Express 인증/경로 역시 standard Vertex와 구분한다.
-
-개인용 Vertex 인증은 설치된 `gcloud`를 통해 ADC access token을 얻는 방식으로 시작한다.
-사용자가 외부에서 ADC login을 완료하고, 앱은 인자 배열로 `gcloud auth application-default print-access-token`을 실행한다.
-Swift에서 ADC 전체를 재구현하는 것은 아니다. 토큰은 메모리에만 두고 요청 시 획득하며 동시 획득을 합친다.
-이전 캐시 토큰의 남은 수명을 임의로 1시간이라고 가정하지 않는다. gcloud는 Vertex 연결에만 필요한 선택 의존성이다.
-
-### 연결과 모델 프로필
-
-`ProviderConnection`:
-
-- id, 표시 이름, 서비스 프리셋, API flavor.
-- base URL과 경로 prefix. endpoint builder가 `/v1` 중복이나 프록시 prefix 소실을 방지.
-- 인증 전략: none / Bearer / provider API-key header / custom headers / Vertex gcloud helper.
-- 비밀 값은 Keychain 참조, 비밀이 아닌 설정은 로컬 저장.
-- 연결·첫 응답·스트림 무응답 제한, 취소 정책.
-- 사용자 지정 네트워크 전송 설정과 연결 설정 revision.
-
-`ModelProfile`:
-
-- connection ID, model ID, 표시 이름, context budget, 출력 한도.
-- 도구 호출, 스트리밍, 병렬 호출, reasoning, structured output 등 capability.
-- capability별 `unknown / verified / unsupported`, 근거, 확인 시점, 사용자 override.
-- 해당 API가 지원하는 sampling/reasoning 옵션만 저장·전송.
-- 실제 추론 위치에 대한 사용자 설명/확인 상태. URL만 보고 로컬 추론이라고 단정하지 않음.
-
-모델 목록 조회 성공은 도구 호출 지원의 증거가 아니다. 연결 진단은 일반 응답, 스트리밍, 무해한 도구 호출과 결과 반환까지 단계별로 확인한다.
-검증 결과는 URL·모델·설정 revision에 연결한다. 모든 모델의 코딩 능력이나 향후 서버 설정까지 보장하지 않는다.
-
-### 외부 모델 서버
-
-동일한 연결 타입으로 아래 형태를 처리한다. 주소는 예시다.
-
-| 서버 | 예시 |
-| --- | --- |
-| Mac의 vLLM | `http://localhost:8000/v1` |
-| LAN의 vLLM | `http://192.168.1.20:8000/v1` |
-| 외부 vLLM 프록시 | `https://models.example.com/team-a/v1` |
-| Mac의 Ollama | `http://localhost:11434` |
-| 외부 Ollama 프록시 | `https://models.example.com/ollama` |
-
-- 외부 연결은 HTTPS를 기본으로 한다. HTTP 개발/LAN 서버는 해당 연결에 명시적으로 설정할 수 있게 한다.
-- 인증서는 시스템 신뢰 검증을 사용한다. 사설 CA는 OS 신뢰 설정으로 처리하며 전역 인증서 검증 해제는 제공하지 않는다.
-- Bearer/custom header는 연결별로 저장한다. 다른 origin으로 redirect할 때 자격 증명을 전달하지 않는다.
-- 역방향 프록시의 경로 prefix, 타임아웃, 스트리밍 buffering 영향을 연결 진단에서 드러낸다.
-- 연결 실패, 인증 실패, 모델 없음, capability 오류, 첫 토큰 대기, 중간 스트림 단절을 구분한다.
-- 연결이 끊기면 미완성 tool call은 실행하지 않는다. 도구 실행 이후 무작정 전체 turn을 재시도하지 않는다.
-- provider 장애 때 다른 클라우드로 자동 전환하지 않는다. 사용자가 대상 연결을 선택한다.
-
-모델 endpoint와 workspace executor를 서로 독립적으로 둔다. 외부 모델 서버 연결은 원격 파일 접근이나 원격 shell 실행을 의미하지 않는다.
-Ollama localhost도 cloud 모델을 중계할 수 있으므로 `localhost == 모든 추론이 내 Mac`이라는 표시를 하지 않는다.
-
-## 5. API 경계와 스트리밍
-
-개념 인터페이스:
-
-```swift
-protocol ModelProvider: Sendable {
-    func stream(_ request: ModelRequest) async throws
-        -> AsyncThrowingStream<ModelEvent, Error>
-}
+```text
+Apps/Lathe/                    # Xcode app / native presentation
+Packages/LatheKit/
+  Sources/LatheDomain/          # IDs, events, effects, protocols
+  Sources/LatheRuntime/         # session, run, task, workflow, schedules
+  Sources/LatheContext/         # instructions, memory, compilation
+  Sources/LathePolicy/          # permission modes, trust, matching
+  Sources/LatheProviders/       # API codecs, transport, auth strategies
+  Sources/LatheTools/           # registry, broker, file/git contracts
+  Sources/LatheExecution/       # process, PTY, sandbox, local/SSH
+  Sources/LatheExtensions/      # compatibility, skills/hooks/MCP/plugins/LSP
+  Sources/LathePersistence/     # SQLite, blobs, migration, journal
+  Sources/LatheProtocol/        # IPC schemas and client
+  Sources/LatheEngine/          # executable / composition root
+  Sources/LatheCLI/             # executable / arguments and output
+  Sources/LatheRunner/          # executable / process supervision
+  Tests/                       # fixtures and behavioral contracts
 ```
 
-`ModelEvent`는 text delta, tool-call assembly, usage, 정상 완료를 표현한다. 네트워크·프로토콜 실패는 typed error로 반환한다.
-정상 완료에는 finish reason과 재전송에 필요한 provider continuation state가 포함된다.
-스트림 종료와 정상 응답 완료를 구분하며, task 취소는 HTTP 요청 취소까지 전달한다.
+이는 논리 경계다. M0에서 Domain/Runtime/Protocol과 필요한 구현부터 만들고 해당 단계에 target을 추가한다.
+Domain은 Foundation 중심의 Sendable value types/protocol만 가지며 SwiftUI·HTTP DTO·SQLite에 의존하지 않는다.
+Runtime은 Domain port를 호출하고 Engine이 구현을 주입한다. Extensions는 등록/결정만 제공하며 실행 권한을 직접 발급하지 않는다.
+App/CLI는 Protocol client에 의존한다. provider별 분기를 UI나 agent loop에 넣지 않는다.
 
-- SSE와 NDJSON은 프레이밍 계층을 분리한다. UTF-8·JSON이 임의 byte 경계로 잘릴 수 있다.
-- 도구 호출은 provider의 ID/index/block 기준으로 조립한다. 공통 ID가 없으면 어댑터가 매핑한다.
-- 어댑터가 정상 완료를 확인한 호출만 JSON/schema 검증 후 실행 대상으로 넘긴다.
-- 불완전한 JSON, 토큰 한도 종료, 연결 단절, 알 수 없는 tool은 파일 변경 전에 처리한다.
-- UI용 텍스트와 다음 요청에 필요한 provider 원본 블록을 분리 저장한다.
-- OpenAI reasoning items, Gemini thought signatures, Anthropic thinking/signature는 provider별 규칙에 맞게 원형 보존한다.
-- provider 고유 상태는 다른 provider에 전달하지 않는다. UI에 노출할 요약과 opaque continuation 데이터를 구분한다.
+## 5. 도메인 모델
 
-provider/model 변경은 실행이 끝난 시점에 가능하게 한다. 다른 연결로 전환할 때 사용자·assistant 텍스트와 도구 결과·명시적 요약으로 새 실행 분기를 만들고,
-출처와 전환 지점을 기록한다. 숨겨진 provider 상태를 단순 문자열로 변환해 전달하지 않는다.
-
-## 6. 에이전트 실행과 도구
-
-기본 루프: 요청 → 컨텍스트 구성 → 모델 응답 → 도구 검증·정책 판단 → 실행 → 결과를 모델에 반환 → 반복 → 최종 답변.
-
-상태는 `idle`, `preparing`, `streaming`, `awaitingApproval`, `executingTools`, `completed`, `cancelled`, `failed`, `interrupted`를 명시한다.
-turn별 최대 도구 반복 수, 실행 시간, 출력 크기, context budget을 둔다. 지원 확인 전 병렬 tool 호출을 가정하지 않는다.
-MVP 도구 실행은 직렬로 시작한다.
-
-| 도구 | 초기 동작 |
+| 엔터티 | 필드와 불변식 |
 | --- | --- |
-| `list_files` / `search_text` | 작업 폴더 검색, ignore 적용, 결과 한도 |
-| `read_file` | 범위 읽기, 파일 크기 제한 |
-| `apply_patch` | 변경 전 diff, 승인 정책, 기존 내용 검증 후 적용 |
-| `run_command` | 실행 파일/인수 또는 명시적 shell mode, cwd, 제한 시간, 출력 |
-| `git_status` / `git_diff` | 현재 변경을 읽고 사용자에게 표시 |
+| Workspace | id, environmentID, canonical root, repository/worktree ID, trust revision |
+| Session | id, workspaceID, title, parent session/revision, instruction profile |
+| Turn | 사용자 입력 경계, checkpointID, typed attachments, 입력 출처 |
+| Run | turnID, attempt, model/permission snapshot, budget, state |
+| ModelStep | request ID, provider snapshot, completion reason, continuation reference |
+| ToolInvocation | invocation ID, provider call mapping, tool ID, args hash, effects, state |
+| ApprovalGrant | request hash, scope, workspace/connection, policy revision, expiry |
+| Task | parent/root ID, kind, environment, state, 예산 예약 |
+| Checkpoint | turn/revision, file manifests, baseline blobs, 변경 소유자 |
+| ProviderContinuation | connection/model/API identity, opaque blocks, replay constraints |
+| MemoryEntry | scope, source, text, 사용자에게 보이는 revision |
+| ExtensionInstall | source/version/hash, scope, declared effects, compatibility report |
+| Schedule | trigger/timezone, workspace, overlap/misfire policy, enabled |
 
-읽기는 선택한 작업 폴더와 명시적 허용 범위 안에서 수행한다. 패치·명령 승인은 도구·프로젝트·세션 범위로 표현하고 실행 기록에 남긴다.
-경로 traversal과 symlink를 검증하고, 파일이 읽은 뒤 바뀌면 patch를 중단하고 다시 확인한다.
-쓰기 전에 변경 전 내용/hash와 실행 intent를 기록한다. 여러 파일 패치 중 일부만 적용된 경우도 복구 기록에 남긴다.
-자동 복원은 현재 파일이 에이전트가 기록한 적용 후 상태와 일치할 때만 허용한다.
+MessagePart는 text/attachment/tool-call/tool-result/summary를 구분한다. tool result는 call ID와 연결한다.
+provider 서명은 canonical 대화와 별도로 보존한다. agent 메시지·webhook·tool output·사용자 입력을 구분하고 외부 입력을 사용자 승인으로 승격하지 않는다.
 
-명령 실행은 UI와 별도 `CommandExecutor` 뒤에 둔다. `Process`/POSIX 구현을 기본 후보로 하고 Swift Subprocess 도입은 구현 시 판단한다.
-stdout/stderr를 함께 소비하고 출력은 한도를 두어 별도 파일로 저장한다. 취소·시간 초과 시 프로세스 그룹 종료를 구현·검증한다.
-shell 명령은 임의 효과를 낼 수 있으므로 단순 명령 이름 allowlist를 격리 기능처럼 취급하지 않는다.
-작업 경로와 앱 승인 정책은 OS sandbox가 아니다. 일반 코드 도구 실행을 위해 초기 GitHub 빌드는 App Sandbox를 사용하지 않는 방향으로 설계한다.
+## 6. 상태와 중간 입력
 
-기존 사용자 변경을 시작 시 기록하고 에이전트 변경과 구분한다. 앱이 자동으로 stash/reset/commit/push하지 않는다.
-Lathe 자체를 개발하면서 기능별 GitHub 커밋을 하는 작업 흐름은, 앱이 사용자 저장소를 자동 커밋하는 기능과 별개다.
+```text
+queued -> preparing -> streaming -> evaluatingTools
+                         |                |
+                         |                +-> awaitingApproval -> executingTools
+                         |                                       |
+                         +<------------- feedingResults <---------+
+                         +-> completed
 
-## 7. 컨텍스트와 저장
+active -> cancelling -> cancelled
+safe boundary -> awaitingInput / compacting / retryWaiting
+active -> failed / interrupted / needsReconciliation
+```
 
-초기는 파일 목록·검색·선택 범위 읽기로 컨텍스트를 수집한다. 임베딩 인덱스는 필요성이 확인되면 추가한다.
-프로젝트 지침은 적용 위치와 출처를 추적한다. 도구 출력·파일 내용이 실행 권한 정책을 바꾸지는 않는다.
-전체 저장소를 매번 전송하지 않고, 선택 내용·최근 대화·도구 결과를 예산 안에서 구성한다.
-모델별 토큰 계산을 사용할 수 없는 경우 보수적 추정임을 표시한다. 오래된 대화는 요약하되 원본은 로컬에 보존한다.
-컨텍스트 요약은 완료된 turn 경계에서 수행한다. 진행 중인 tool call·결과·서명 블록을 분리하거나 삭제하지 않는다.
-전송 이력을 재구성할 때 continuation을 재사용할 수 있는지 어댑터가 판단하고, 호환되지 않으면 명시적 요약으로 새 실행 분기를 시작한다.
+세션에는 active run이 하나다. side chat/child session은 고유 run을 갖는다.
+추가 지시는 mailbox에 기록하고 도착/반영 event를 분리한다. 기본은 현재 model step/도구 결과의 안전한 경계에서 반영한다.
+즉시 중단은 HTTP와 실행 작업을 취소한다. 적용한 파일을 자동 롤백하지 않고 checkpoint 선택을 제공한다.
+mid-stream steering 미지원 provider는 중단 후 새 step에서 지시를 반영한다. 계획 승인도 명시적 사용자 command이며 모델이 승인하지 못한다.
 
-SQLite에 `Workspace`, `Session`, `Turn`, `Message`, `ToolCall`, `Approval`, `FileChange`, provider continuation을 저장한다.
-DB 접근은 `SessionStore`로 추상화하고, 구현 시 SQLite wrapper를 고정한다. 대형 출력은 Application Support 아래 파일로 분리한다.
-API key·인증 header 값은 Keychain, access token은 메모리, UI 설정은 UserDefaults에 둔다.
-일반 진단 로그에는 원문 코드·대화·비밀을 기본 기록하지 않는다.
+HTTP 재요청과 tool 재실행은 다르다. 완료된 tool 결과는 다시 전송할 수 있지만 도구 자체를 재실행하지 않는다.
+새 call ID로 같은 변경이 제안되면 파일 precondition·실행 상태를 확인한다. shell/MCP 외부 효과에 exactly-once를 주장하지 않는다.
+토큰 한도·취소·비정상 EOF에서 미완성 tool call을 실행하지 않는다.
 
-도구 실행 전 intent와 완료 후 결과를 기록한다. 앱 재시작 시 진행 중 작업은 `interrupted`로 복원한다.
-완료 여부가 불명확한 shell 작업은 자동 재실행하지 않는다. 이 기록은 임의 shell 명령의 exactly-once 실행을 보장하지 않는다.
+## 7. ToolBroker 계약
 
-## 8. 근거와 구현 시 재확인할 사항
+모든 built-in/MCP/subagent 도구 호출은 같은 broker를 통과한다.
 
-아래는 2026-10-15에 확인한 공식 문서다. API 버전·모델 기능은 실제 어댑터 구현 시 다시 검증한다.
+1. registry의 ToolID/schema revision, 인수·출처·scope를 검증한다.
+2. 명백한 hard deny와 취소 상태를 확인한다.
+3. PreToolUse hook을 실행한다. 변경된 인수는 새 후보로 취급한다.
+4. schema/path/environment/effect를 재검증하고 최종 정책을 계산한다.
+5. 승인은 최종 args hash·환경·policy revision에 묶는다. 상태가 바뀌면 재평가한다.
+6. write lease/file precondition을 확보하고 intent/checkpoint 참조를 durable 저장한다.
+7. executor에서 실행하고 progress·취소·timeout을 처리한다.
+8. 결과/change manifest를 저장하고 완료 receipt를 발급한다.
+9. 결과 저장 후 부모 write lease를 해제하고 post/failure hook을 실행한다. hook의 쓰기는 새 lease를 얻는다. post hook 실패는 기존 효과를 미실행으로 바꾸지 않는다.
 
-- [OpenAI streaming](https://developers.openai.com/api/docs/guides/streaming-responses): SSE와 의미별 이벤트.
-- [OpenAI function calling](https://developers.openai.com/api/docs/guides/function-calling), [reasoning](https://developers.openai.com/api/docs/guides/reasoning): 도구 결과 왕복과 재전송 상태.
-- [Gemini GenerateContent](https://ai.google.dev/api/generate-content), [Interactions streaming](https://ai.google.dev/gemini-api/docs/streaming): 서로 다른 API 형식.
-- [Gemini thought signatures](https://ai.google.dev/gemini-api/docs/generate-content/thought-signatures): opaque part 상태 보존.
-- [Google REST 인증](https://docs.cloud.google.com/docs/authentication/rest), [gcloud ADC token](https://docs.cloud.google.com/sdk/gcloud/reference/auth/application-default/print-access-token): Vertex 인증 helper의 근거.
-- [Vertex function calling](https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/tools/function-calling): Gemini tool 형식.
-- [Anthropic streaming](https://platform.claude.com/docs/en/build-with-claude/streaming), [tool results](https://platform.claude.com/docs/en/agents-and-tools/tool-use/handle-tool-calls), [thinking](https://platform.claude.com/docs/en/build-with-claude/thinking): block stream·tool 결과·서명 보존.
-- [vLLM API](https://docs.vllm.ai/en/stable/serving/online_serving/openai_compatible_server/), [tool calling](https://docs.vllm.ai/en/stable/features/tool_calling/): 호환 범위와 서버/parser 설정.
-- [vllm-metal](https://github.com/vllm-project/vllm-metal): Mac 추론 런타임도 가능하며 설치/운영은 앱 연결과 별도 범위.
-- [Ollama chat](https://docs.ollama.com/api/chat), [streaming](https://docs.ollama.com/api/streaming), [authentication](https://docs.ollama.com/api/authentication): NDJSON, native API, localhost와 실제 추론 위치의 차이.
-- [Apple AppKit bridge](https://developer.apple.com/documentation/swiftui/nsviewrepresentable), [Keychain](https://developer.apple.com/documentation/security/keychain-services): 네이티브 UI와 자격 증명 저장.
+ToolDescriptor는 stable ID, compatibility alias, schema, effect/concurrency class, 취소/timeout,
+출력 한도, idempotency 설명, 지원 environment를 갖는다. 내부 `workspace.read`와 호환명 `Read`의 이름·인수를 adapter가 변환한다.
+MCP의 readOnly annotation은 참고 정보이며 권한의 증거가 아니다.
+모든 hook 실행은 origin과 invocation stack을 갖는다. hook의 내부 실행에도 정책·journal·sandbox를 적용하되 현재 stack의 같은 hook/lifecycle 재발행을 차단한다.
+다른 hook을 유발하는 체인도 깊이·횟수 한도를 적용한다. hook을 기다리면서 부모의 workspace write lease를 잡아두지 않는다.
+읽기는 bounded parallel, 파일 쓰기·shell·Git mutation은 같은 workspace의 write lane에서 직렬화한다.
+장기 서버도 파일을 바꿀 수 있으므로 별도 concurrent task 전환 시 격리/충돌 정책을 적용한다. 병렬 코딩 writer는 worktree를 사용한다.
+
+## 8. 권한·신뢰·격리
+
+| 모드 | Lathe 동작 계약 |
+| --- | --- |
+| Manual (`default`) | 범위 내 읽기/허용 규칙 실행, 나머지는 효과·인수를 보여주고 승인 |
+| Accept edits | 지정 범위 편집 허용, shell/network는 별도 규칙 |
+| Plan | 탐색/읽기/계획만 허용. source write와 임의 shell 차단, 제한된 읽기 executor |
+| Don't ask | 허용된 동작만 수행. 승인 필요 시 구조화된 denial |
+| Auto review | 별도 평가기가 요청·효과 검토. 검증된 reviewer profile 없으면 사용 불가 |
+| Bypass | 사용자가 직접 활성화. 명시적 deny·상호작용 필수 도구·환경 제한 유지 |
+
+이는 Lathe의 제안이며 Claude 내부 분류기 판단을 복제한다는 뜻이 아니다. Auto를 무조건 허용 스위치로 구현하지 않는다.
+hard deny → explicit ask → allow → 모드 기본값 순서다. 프로젝트가 자신을 신뢰하거나 bypass를 켤 수 없다.
+복합 shell/substitution/redirect를 단순 prefix만으로 승인하지 않는다. 효과를 해석하지 못하면 ask/deny로 처리한다.
+grant는 once/session/workspace 범위이며 바뀐 args/target/policy에 재사용하지 않는다.
+headless에 응답 client가 없으면 needsApproval/needsInput 결과로 종료한다.
+
+workspace 시작 순서는 discovery → 수동적 parse/검증 → trust/activation → executable startup이다.
+SessionStart/Setup hook, skill 전처리, 프로젝트 helper/MCP는 activation 전 실행하지 않는다.
+agent/hook/shell이 바꾼 실행 설정과 권한 확대는 pending revision이며 사용자가 명시적으로 수락해야 활성화된다.
+approval DB·engine 설정/IPC 경로는 일반 file tool 쓰기 대상에서 제외하고 sandbox deny에도 반영한다. 비격리 same-user 프로세스까지 막는다고 주장하지 않는다.
+보안 설정 parse 실패 시 마지막 정상 revision을 유지하거나 관련 실행을 막는다. 최초 보안 설정이 깨졌다면 해당 workspace 실행을 보류한다.
+
+Plan 전환은 실행 barrier다. 세션 소유 writer와 mutation hook/skill 전처리를 중지·대기시키고, MCP write/효과 미확인 호출을 막는다.
+이미 시작한 관련 process의 중지 확인 전에는 Plan 진입 완료로 표시하지 않는다. 필요한 확장 process는 검증된 읽기 전용 환경에서만 계속 사용한다.
+Plan의 보장은 이 세션이 요청한 변경 차단이며, 다른 세션·외부 editor가 프로젝트를 바꾸지 못한다는 전역 파일 격리를 뜻하지 않는다.
+
+App Sandbox·tool 승인·하위 프로세스 OS sandbox는 서로 다르다.
+GitHub 소스 앱은 개발 도구 접근을 위해 App Sandbox를 사용하지 않는 안이지만 shell sandbox는 별도 필수 기능이다.
+SandboxBackend에 filesystem grants, network policy, process-tree containment, violation 결과를 정의한다.
+macOS backend는 Seatbelt launcher/network proxy를 기술 검증한다. 우회·자식 프로세스·툴체인 검증 전에는 sandbox 완료로 표시하지 않는다.
+Swift backend가 성립하지 않으면 검증된 외부 helper/VM을 명시적으로 선택한다. Node를 숨은 코어 필수 의존성으로 추가하지 않는다.
+파일은 경로 정책, shell은 정책+선택 sandbox, MCP/hooks/LSP는 각각 선언된 process/network 권한을 적용한다.
+원격 MCP 부수효과는 로컬 sandbox로 제한할 수 없다. 인증 helper/hook에도 실행 기록·제한을 적용한다.
+provider key는 shell environment에 자동 상속하지 않으며 provider 네트워크와 tool network grants는 별개다.
+
+## 9. 변경·checkpoint·Git
+
+- turn 시작에 checkpoint marker, 편집 직전 파일 baseline을 lazy snapshot한다.
+- snapshot은 존재 여부·bytes·mode·hash·workspace를 포함하고 생성/삭제/rename은 manifest로 기록한다.
+- patch는 읽은 파일 hash를 precondition으로 적용 직전 검증한다. 충돌이면 덮어쓰지 않는다.
+- 다중 파일 변경은 preflight+journal을 사용한다. 여러 filesystem write가 DB transaction처럼 원자적이라고 주장하지 않는다.
+- crash 시 pre/post hash로 적용됨/미적용/충돌을 판별하고 needsReconciliation으로 복원한다.
+- rewind는 대화만/코드만/둘 다를 구분하며 현재 파일이 기록 상태와 다르면 충돌 검토를 제공한다.
+- shell/MCP/외부 API 효과는 자동 복원 범위가 아니다. 추적 범위를 UI에 표시한다.
+- 사용자/다른 세션 변경을 구분한다. subagent file tool 변경은 소유자와 root checkpoint를 연결한다.
+- Git commit/push/PR은 정상 기능으로 제공하며 요청/명시적 자동화 정책으로 수행한다. checkpoint와는 별개다.
+- branch/worktree 변경 시 파일 cache/LSP/context revision을 무효화한다. dirty worktree를 자동 제거하지 않는다.
+
+## 10. 컨텍스트와 메모리
+
+ContextCompiler가 system policy, 사용자 요청, 적용 지침/스킬, 최근 대화, 파일 범위, tool result를 조립한다.
+item별 source/scope/trust/token estimate/truncation을 보존한다. 설정·지침 병합은 extensions 문서가 소유한다.
+context 예산은 입력 상한 - 출력 예약 - tool schema/continuation 여유로 계산한다. 정확한 계산이 없으면 추정임을 표시한다.
+오래된 큰 output부터 참조/요약으로 바꾸고 완료된 대화 구간을 압축한다. 원본 event/blob는 보존한다.
+진행 중 call/result/signature bundle을 쪼개지 않는다. 긴 turn도 완료된 tool round 경계에서 compaction 가능하다.
+adapter가 이력 재구성 후 continuation 재사용 가능성을 판단하고, 불가능하면 명시적 요약으로 새 continuation을 만든다.
+반복 압축 실패는 사용자에게 표시하고 무한 재시도하지 않는다.
+auto memory는 inspect/edit/delete/disable 가능한 저장소다. 출처·project scope·revision을 보존하며 권한/비밀 저장과 분리한다.
+private reasoning/서명은 다른 provider로 보내지 않는다. 전환 시 사용자가 선택한 context transfer를 기록한다.
+
+## 11. 영속성·이벤트·복구
+
+Application Support에 lathe.sqlite, blobs/, task-logs/, checkpoints/, extensions/를 둔다.
+Keychain은 secret, UserDefaults는 UI 선호, 프로젝트 파일은 공유 설정을 맡는다.
+
+```text
+DomainEvent = schemaVersion, eventID, sessionID, runID?, taskID?,
+              sequence, timestamp, causationID, source, payload
+```
+
+주요 event: SessionCreated, InputQueued/Consumed, RunStarted, ModelStepCompleted,
+ToolProposed, ApprovalRequested/Resolved, ToolIntentCommitted, ToolFinished,
+FileChangeRecorded, CheckpointCreated, ContextCompacted, TaskStateChanged, RunFinished.
+부분 text/output은 묶어서 저장할 수 있지만 완료 메시지와 tool intent/result는 durable 저장 후 다음 단계로 이동한다.
+event와 조회 projection을 같은 transaction에 갱신하고 client는 cursor로 replay한다.
+느린 UI에서는 delta를 합치고 큰 출력은 blob 참조로 바꾼다. 무제한 메모리 queue를 만들지 않는다.
+재시작 시 완료를 증명할 수 없는 작업은 interrupted/unknown이다. PID만 보고 종료하지 않고 runner ID/시작 시각/환경을 확인한다.
+완료 receipt는 replay하고 부수효과는 재실행하지 않는다. unknown은 작업별 reconciliation을 거친다.
+보존 기간·export·삭제를 제공하고 살아 있는 checkpoint/blob 참조를 확인해 수집한다.
+
+## 12. 병렬 작업·workflow·자동화
+
+subagent는 parent/root ID, 별도 context, tool allowlist, provider profile, 예산을 갖는다.
+권한은 parent와 agent 정의의 교집합이며 스스로 확대하지 못한다. 결과 요약/artifact를 반환하고 상세 로그도 보관한다.
+최대 깊이/동시성/비용을 제한하고 취소를 자식에게 전파한다. 명시적 detached task만 별도 수명 정책을 갖는다.
+peer team은 별도의 공유 task board, claim lease, mailbox, 종료 프로토콜을 사용한다.
+임의 shell 동시 쓰기를 file lock으로 안전하다고 주장하지 않는다. 병렬 writer는 격리 worktree를 사용한다.
+workflow는 fan-out/fan-in, 조건, 제한된 반복, 중간 결과를 표현한다. script 효과도 broker 정책을 따른다.
+
+자동화는 세션 loop / 영속 local schedule / 완료 조건을 가진 goal로 구분한다.
+Schedule에 timezone/DST, sleep 중 누락, overlap(skip/queue), 만료/예산/승인 대기를 명시한다.
+local schedule은 engine이 실행 가능할 때 동작하며 컴퓨터가 꺼져 있어도 실행된다고 표시하지 않는다.
+goal은 완료 근거·중단 조건·예산·취소를 기록한다. 모델의 반복 성공 선언만으로 완료 처리하지 않는다.
+
+## 13. 네이티브 UI 계약
+
+| 화면 | 표시와 조작 |
+| --- | --- |
+| Sidebar | 프로젝트/worktree/세션/agent/task/schedule, 상태 badge |
+| Conversation | 스트림, tool card, steering queue, 질문/승인, 첨부/@file |
+| Plan | 계획 revision, 수정 요청, 승인 후 실행, 결과 연결 |
+| Changes | diff, hunk 의견, checkpoint/rewind, 충돌 |
+| Tasks/terminal | shell/PTY, stdout/stderr, background/stop, child tree |
+| Context | 적용 지침/스킬/메모리, 점유량, compaction, 사용량 |
+| Providers | 여러 URL/auth/prefix, 모델 capability, 진단/전환 |
+| Extensions | source/version/trust/호환 보고서, MCP/LSP 상태 |
+| Permissions | 모드/규칙/grant/sandbox 상태, 설정 출처 |
+
+slash/menu/키보드는 같은 command registry를 사용하고 CLI도 같은 command API를 호출한다.
+send/줄바꿈/중단/명령 팔레트/검색을 구분하며 VoiceOver·키보드·한글 IME를 검증한다.
+transcript는 가상화하고 사용자가 스크롤하면 tail-follow를 멈춘다. 렌더링이 model loop를 막지 않는다.
+preview, browser automation, computer use를 별도 capability로 표시한다.
+
+## 14. 원격 실행과 서비스
+
+ExecutionEnvironment는 read/search/patch/run/PTY/Git/checkpoint/watch/port-forward capability를 광고한다.
+M1은 local, M7은 SSH backend다. 원격 path/environment ID를 보존하고 연결 복구·로그 cursor·lease를 처리한다.
+모델 credential을 remote shell에 자동 전달하지 않는다.
+IntegrationService는 검색/browser/GitHub/remote relay/cloud runner/artifact hosting 등의 별도 연결이다.
+일반 모델 API key로 Claude 구독 서비스에 접근할 수 있다고 가정하지 않는다.
+웹/모바일 remote control, 컴퓨터가 꺼진 동안 cloud routine, hosted review는 자체 또는 연결한 backend가 필요하다.
+이 기능을 요구사항에서 삭제하지 않되 local app 완료와 별도 게이트로 추적한다.
+
+## 15. 구현 전 기술 게이트
+
+| 게이트 | 성공 판정 |
+| --- | --- |
+| Engine/IPC | GUI+CLI 동시 시작에도 engine 하나, detach/replay, stale socket/migration lock, 버전 불일치 처리 |
+| Process/PTY | 출력 폭주, stdin/resize, timeout, 자식 종료, 앱 재접속 |
+| Sandbox | 파일/네트워크/프로세스 우회 fixture 및 실제 툴체인. 미지원 시 대안 결정 |
+| Persistence | edit 전후 crash injection, 복구/migration, 외부 명령 unknown 처리 |
+| Provider | OpenAI+원격 호환 서버에서 stream/tool 왕복/취소/continuation |
+| Compatibility | fixture import→resolve→hook/tool 변환, 미지원 필드 명시 진단 |
+
+해결되지 않은 항목을 확정 구현으로 표시하지 않는다. 실패하면 요구를 몰래 줄이지 않고 결정 기록을 갱신한다.
+
+## 16. 공식 근거
+
+현재 기능 동작을 참고한 설계이며 비공개 내부 구현을 재현했다고 주장하지 않는다.
+
+- [Agent loop/세션](https://code.claude.com/docs/en/how-claude-code-works)
+- [권한 모드](https://code.claude.com/docs/en/permission-modes), [권한 규칙](https://code.claude.com/docs/en/permissions)
+- [Shell sandbox 범위](https://code.claude.com/docs/en/sandboxing), [공개 sandbox runtime](https://github.com/anthropics/sandbox-runtime)
+- [Checkpoint](https://code.claude.com/docs/en/checkpointing), [CLI](https://code.claude.com/docs/en/cli-reference), [Desktop](https://code.claude.com/docs/en/desktop)
+- [Subagents](https://code.claude.com/docs/en/sub-agents), [실험적 agent teams](https://code.claude.com/docs/en/agent-teams)
+- [Workflows](https://code.claude.com/docs/en/workflows), [기능 가용성](https://code.claude.com/docs/en/feature-availability)

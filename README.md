@@ -1,14 +1,19 @@
 # lathe-code
 Lathe: a native macOS coding agent in Swift
 
-Swift로 만드는 개인용 macOS 코딩 에이전트. OpenAI, Google AI Studio,
-Vertex AI, Anthropic Claude, vLLM, Ollama 및 기타 호환 모델 서버를 지원할 계획입니다.
+Swift로 만드는 개인용 macOS 코딩 에이전트. Claude Code와 동등한 코딩 작업 흐름을
+네이티브 앱과 공통 CLI에서 제공하는 것이 목표입니다. OpenAI, Google AI Studio,
+Vertex AI, Anthropic Claude, vLLM, Ollama 및 기타 모델 서버를 지원할 계획입니다.
 모델 서버는 같은 Mac, LAN, 외부 서버 어디에나 둘 수 있습니다.
 
 현재는 설계 단계입니다. 앱 기능과 빌드 프로젝트는 아직 구현하지 않았습니다.
 
-- [아키텍처 설계](docs/architecture.md)
-- [구현 순서와 기능별 커밋 계획](docs/roadmap.md)
+- [기능 정의와 완료 기준](docs/features.md)
+- [상세 아키텍처](docs/architecture.md)
+- [설정·Skills·Hooks·MCP·Plugins 호환 계약](docs/extensions.md)
+- [프로바이더와 원격 모델 연결](docs/providers.md)
+- [구현 순서와 변경별 커밋 계획](docs/roadmap.md)
 
 개인 사용과 GitHub 소스 배포를 우선합니다. 최소 지원 버전은 macOS 15 이상을
 제안하며, SwiftUI와 AppKit으로 네이티브 UI를 구성합니다.
+코드뿐 아니라 설계·문서·설정도 의미 있는 변경 단위마다 검증 후 커밋하고 GitHub에 반영합니다.
