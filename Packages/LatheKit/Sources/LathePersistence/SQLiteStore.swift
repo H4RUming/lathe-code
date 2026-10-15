@@ -66,7 +66,7 @@ public final class SQLiteStore {
             throw LatheError.invalidRequest("실행 페이지 limit은 1~4여야 합니다.")
         }
         let metadata = try sessionMetadata(id: id)
-        var sql = "SELECT id, session_id, prompt, response, state, started_at, finished_at FROM runs WHERE session_id = ?"
+        var sql = "SELECT id, session_id, prompt, response, state, started_at, finished_at, configuration FROM runs WHERE session_id = ?"
         var values: [Value] = [.text(id.uuidString)]
         if let beforeRunID {
             guard let row = try query(
@@ -107,10 +107,150 @@ public final class SQLiteStore {
 
     public func run(id: UUID) throws -> RunSnapshot {
         guard let row = try query(
-            "SELECT id, session_id, prompt, response, state, started_at, finished_at FROM runs WHERE id = ?",
+            "SELECT id, session_id, prompt, response, state, started_at, finished_at, configuration FROM runs WHERE id = ?",
             [.text(id.uuidString)]
         ).first else { throw LatheError.notFound("실행을 찾을 수 없습니다.") }
         return try decodeRun(row)
+    }
+
+    public func listProviderProfiles() throws -> [ProviderProfile] {
+        try query("SELECT snapshot FROM provider_profiles ORDER BY rowid LIMIT 64").map {
+            try decode(string($0[0]))
+        }
+    }
+
+    /// Profile metadata contains connection settings, never an API credential.
+    public func saveProviderProfile(_ profile: ProviderProfile) throws {
+        try profile.validate()
+        try transaction {
+            let existing = try query("SELECT id FROM provider_profiles WHERE id = ?", [.text(profile.id.uuidString)])
+            if existing.isEmpty {
+                guard try integer(query("SELECT COUNT(*) FROM provider_profiles")[0][0]) < 64 else {
+                    throw LatheError.invalidRequest("Provider 설정은 최대 64개까지 저장할 수 있습니다.")
+                }
+            }
+            try execute(
+                "INSERT INTO provider_profiles (id, snapshot) VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET snapshot = excluded.snapshot",
+                [.text(profile.id.uuidString), .text(try encode(profile))]
+            )
+        }
+    }
+
+    public func invocation(id: UUID) throws -> ToolInvocationSnapshot {
+        guard let row = try query("SELECT snapshot FROM tool_invocations WHERE id = ?", [.text(id.uuidString)]).first else {
+            throw LatheError.notFound("도구 실행을 찾을 수 없습니다.")
+        }
+        return try decode(string(row[0]))
+    }
+
+    public func saveModelHistory(runID: UUID, blobID: String) throws {
+        guard BlobStore.validID(blobID) else { throw LatheError.invalidRequest("Blob 식별자가 올바르지 않습니다.") }
+        try transaction {
+            _ = try run(id: runID)
+            try execute(
+                "INSERT INTO model_histories (run_id, blob_id) VALUES (?, ?) ON CONFLICT(run_id) DO UPDATE SET blob_id = excluded.blob_id",
+                [.text(runID.uuidString), .text(blobID)]
+            )
+        }
+    }
+
+    public func modelHistory(runID: UUID) throws -> String? {
+        _ = try run(id: runID)
+        guard let row = try query("SELECT blob_id FROM model_histories WHERE run_id = ?", [.text(runID.uuidString)]).first else { return nil }
+        let id = try string(row[0])
+        guard BlobStore.validID(id) else { throw LatheError.storage("저장된 Blob 식별자가 올바르지 않습니다.") }
+        return id
+    }
+
+    public func invocations(runID: UUID) throws -> [ToolInvocationSnapshot] {
+        _ = try run(id: runID)
+        return try query("SELECT snapshot FROM tool_invocations WHERE run_id = ? ORDER BY rowid LIMIT 64", [.text(runID.uuidString)]).map {
+            try decode(string($0[0]))
+        }
+    }
+
+    /// State projection and replay event are committed together. A terminal
+    /// receipt may arrive after run cancellation, but can never authorize replay.
+    public func saveInvocation(_ snapshot: ToolInvocationSnapshot) throws {
+        try transaction {
+            let run = try run(id: snapshot.runID)
+            guard snapshot.arguments.utf8.count <= 32 * 1_024,
+                  snapshot.summary.utf8.count <= 2 * 1_024,
+                  (snapshot.output?.utf8.count ?? 0) <= 8 * 1_024,
+                  snapshot.callID.utf8.count <= 256, snapshot.name.utf8.count <= 128,
+                  BlobStore.validID(snapshot.requestHash),
+                  snapshot.beforeBlobID.map(BlobStore.validID) ?? true,
+                  snapshot.blobID.map(BlobStore.validID) ?? true else {
+                throw LatheError.invalidRequest("도구 실행 메타데이터가 크기 제한을 초과했습니다.")
+            }
+            if let row = try query("SELECT snapshot FROM tool_invocations WHERE id = ?", [.text(snapshot.id.uuidString)]).first {
+                let previous: ToolInvocationSnapshot = try decode(string(row[0]))
+                guard previous.runID == snapshot.runID, previous.callID == snapshot.callID,
+                      previous.name == snapshot.name, previous.arguments == snapshot.arguments,
+                      previous.requestHash == snapshot.requestHash, previous.summary == snapshot.summary,
+                      previous.effect == snapshot.effect, previous.createdAt == snapshot.createdAt,
+                      previous.beforeBlobID == snapshot.beforeBlobID else {
+                    throw LatheError.conflict("저장된 도구 요청의 내용은 변경할 수 없습니다.")
+                }
+                if previous == snapshot { return }
+                guard !isTerminal(previous.state), validTransition(from: previous.state, to: snapshot.state) else {
+                    throw LatheError.conflict("종료된 도구를 다시 실행하거나 상태를 되돌릴 수 없습니다.")
+                }
+                guard run.state == .running || isTerminal(snapshot.state) else {
+                    throw LatheError.conflict("종료된 실행에서 도구를 승인하거나 시작할 수 없습니다.")
+                }
+            } else {
+                guard run.state == .running else {
+                    throw LatheError.conflict("종료된 실행에 새 도구를 추가할 수 없습니다.")
+                }
+                guard snapshot.state == .pendingApproval || snapshot.state == .approved || snapshot.state == .denied else {
+                    throw LatheError.invalidRequest("도구 실행은 권한 결정부터 기록해야 합니다.")
+                }
+                guard try integer(query("SELECT COUNT(*) FROM tool_invocations WHERE run_id = ?", [.text(snapshot.runID.uuidString)])[0][0]) < 64 else {
+                    throw LatheError.invalidRequest("한 실행에서 도구 요청은 최대 64개입니다.")
+                }
+            }
+            try writeInvocation(snapshot)
+        }
+    }
+
+    /// Normal cancellation invalidates consent only; the runner must supply an
+    /// accurate terminal receipt after its owned process has been cleaned up.
+    public func invalidatePendingInvocations(runID: UUID) throws {
+        try transaction {
+            for var snapshot in try invocations(runID: runID) where snapshot.state == .pendingApproval || snapshot.state == .approved {
+                snapshot.state = .cancelled
+                snapshot.output = "실행 종료로 대기 중인 도구 승인이 취소되었습니다."
+                try writeInvocation(snapshot)
+            }
+        }
+    }
+
+    private func isTerminal(_ state: ToolInvocationState) -> Bool {
+        switch state {
+        case .pendingApproval, .approved, .executing: false
+        case .completed, .denied, .failed, .cancelled, .unknown: true
+        }
+    }
+
+    private func validTransition(from: ToolInvocationState, to: ToolInvocationState) -> Bool {
+        switch from {
+        case .pendingApproval: to == .approved || to == .denied || to == .cancelled
+        case .approved: to == .executing || to == .cancelled || to == .failed
+        case .executing: isTerminal(to)
+        case .completed, .denied, .failed, .cancelled, .unknown: false
+        }
+    }
+
+    private func writeInvocation(_ snapshot: ToolInvocationSnapshot) throws {
+        let run = try run(id: snapshot.runID)
+        let now = storedTimestamp()
+        try execute(
+            "INSERT INTO tool_invocations (id, run_id, call_id, state, snapshot) VALUES (?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET state = excluded.state, snapshot = excluded.snapshot",
+            [.text(snapshot.id.uuidString), .text(snapshot.runID.uuidString), .text(snapshot.callID), .text(snapshot.state.rawValue), .text(try encode(snapshot))]
+        )
+        try touch(run.sessionID, at: now)
+        try insertEvent(sessionID: run.sessionID, runID: run.id, kind: .toolUpdated, text: snapshot.id.uuidString, timestamp: now)
     }
 
     public func createSession(title: String, workspacePath: String) throws -> SessionSnapshot {
@@ -128,8 +268,9 @@ public final class SQLiteStore {
 
     /// The request key and run/event are committed together. Reusing a key for
     /// another payload never starts a second run, including after restart.
-    public func submit(sessionID: UUID, prompt: String, requestID: UUID) throws -> (run: RunSnapshot, created: Bool) {
-        try transaction {
+    public func submit(sessionID: UUID, prompt: String, requestID: UUID, configuration: RunConfiguration? = nil) throws -> (run: RunSnapshot, created: Bool) {
+        try configuration?.validate()
+        return try transaction {
             if let existing = try query(
                 "SELECT session_id, prompt, run_id FROM requests WHERE request_id = ?",
                 [.text(requestID.uuidString)]
@@ -137,7 +278,16 @@ public final class SQLiteStore {
                 guard try uuid(existing[0]) == sessionID, try string(existing[1]) == prompt else {
                     throw LatheError.conflict("같은 요청 ID에 다른 내용이 지정되었습니다.")
                 }
-                return (try run(id: uuid(existing[2])), false)
+                let previous = try run(id: uuid(existing[2]))
+                guard previous.configuration == configuration else {
+                    throw LatheError.conflict("같은 요청 ID에 다른 실행 설정이 지정되었습니다.")
+                }
+                return (previous, false)
+            }
+            if let profile = configuration?.profile {
+                guard try listProviderProfiles().contains(profile) else {
+                    throw LatheError.invalidRequest("저장된 모델 연결과 요청 설정이 다릅니다. 연결 목록을 새로 읽으세요.")
+                }
             }
             guard !(try query("SELECT id FROM sessions WHERE id = ?", [.text(sessionID.uuidString)])).isEmpty else {
                 throw LatheError.notFound("세션을 찾을 수 없습니다.")
@@ -145,10 +295,10 @@ public final class SQLiteStore {
             guard (try query("SELECT id FROM runs WHERE session_id = ? AND state = 'running'", [.text(sessionID.uuidString)])).isEmpty else {
                 throw LatheError.conflict("이 세션에서 이미 실행 중입니다.")
             }
-            let run = RunSnapshot(sessionID: sessionID, prompt: prompt, startedAt: storedTimestamp())
+            let run = RunSnapshot(sessionID: sessionID, prompt: prompt, startedAt: storedTimestamp(), configuration: configuration)
             try execute(
-                "INSERT INTO runs (id, session_id, prompt, response, state, started_at) VALUES (?, ?, ?, '', 'running', ?)",
-                [.text(run.id.uuidString), .text(sessionID.uuidString), .text(prompt), .real(run.startedAt.timeIntervalSince1970)]
+                "INSERT INTO runs (id, session_id, prompt, response, state, started_at, configuration) VALUES (?, ?, ?, '', 'running', ?, ?)",
+                [.text(run.id.uuidString), .text(sessionID.uuidString), .text(prompt), .real(run.startedAt.timeIntervalSince1970), try configuration.map { .text(try encode($0)) } ?? .null]
             )
             try execute(
                 "INSERT INTO requests (request_id, session_id, prompt, run_id) VALUES (?, ?, ?, ?)",
@@ -189,6 +339,7 @@ public final class SQLiteStore {
             case .completed: .runCompleted
             case .cancelled: .runCancelled
             case .interrupted: .runInterrupted
+            case .failed: .runFailed
             case .running: fatalError("Guarded above")
             }
             try insertEvent(sessionID: run.sessionID, runID: runID, kind: kind, text: reason, timestamp: now)
@@ -202,6 +353,17 @@ public final class SQLiteStore {
     /// No model requests are resumed automatically.
     public func recoverInterruptedRuns() throws {
         try transaction {
+            // Include terminal runs too: a process can die after the run cancellation
+            // commits but before its final tool receipt is recorded.
+            let pending = try query("SELECT snapshot FROM tool_invocations WHERE state IN ('pendingApproval', 'approved', 'executing') ORDER BY rowid")
+            for row in pending {
+                var invocation: ToolInvocationSnapshot = try decode(string(row[0]))
+                invocation.state = invocation.state == .executing ? .unknown : .cancelled
+                invocation.output = invocation.state == .unknown
+                    ? "엔진 재시작으로 실행 결과를 확인할 수 없습니다. 자동 재실행하지 않습니다."
+                    : "엔진 재시작으로 대기 중인 승인이 취소되었습니다."
+                try writeInvocation(invocation)
+            }
             let ids = try query("SELECT id FROM runs WHERE state = 'running' ORDER BY started_at, rowid")
             for row in ids {
                 let run = try run(id: uuid(row[0]))
@@ -248,17 +410,48 @@ public final class SQLiteStore {
 
     private func migrate() throws {
         let version = try integer(query("PRAGMA user_version")[0][0])
-        guard version <= 1 else { throw LatheError.storage("더 새로운 데이터베이스 형식입니다. 앱을 업데이트하세요.") }
-        guard version == 0 else { return }
+        guard version <= 2 else { throw LatheError.storage("더 새로운 데이터베이스 형식입니다. 앱을 업데이트하세요.") }
+        guard version < 2 else { return }
+        // Rebuild the v1 CHECK constraint without rewriting the request/event
+        // foreign keys. Restore enforcement even when migration rolls back.
+        try execute("PRAGMA foreign_keys = OFF")
+        defer { try? execute("PRAGMA foreign_keys = ON") }
         try transaction {
-            try execute("CREATE TABLE sessions (id TEXT PRIMARY KEY, title TEXT NOT NULL, workspace_path TEXT NOT NULL, created_at REAL NOT NULL, updated_at REAL NOT NULL)")
-            try execute("CREATE TABLE runs (id TEXT PRIMARY KEY, session_id TEXT NOT NULL REFERENCES sessions(id), prompt TEXT NOT NULL, response TEXT NOT NULL, state TEXT NOT NULL CHECK(state IN ('running','completed','cancelled','interrupted')), started_at REAL NOT NULL, finished_at REAL)")
+            if version == 0 {
+                try execute("CREATE TABLE sessions (id TEXT PRIMARY KEY, title TEXT NOT NULL, workspace_path TEXT NOT NULL, created_at REAL NOT NULL, updated_at REAL NOT NULL)")
+            }
+            try execute("CREATE TABLE runs_v2 (id TEXT PRIMARY KEY, session_id TEXT NOT NULL REFERENCES sessions(id), prompt TEXT NOT NULL, response TEXT NOT NULL, state TEXT NOT NULL CHECK(state IN ('running','completed','cancelled','interrupted','failed')), started_at REAL NOT NULL, finished_at REAL, configuration TEXT)")
+            if version == 1 {
+                try execute("INSERT INTO runs_v2 (rowid, id, session_id, prompt, response, state, started_at, finished_at) SELECT rowid, id, session_id, prompt, response, state, started_at, finished_at FROM runs")
+                try execute("DROP TABLE runs")
+            }
+            try execute("ALTER TABLE runs_v2 RENAME TO runs")
             try execute("CREATE UNIQUE INDEX one_running_run_per_session ON runs(session_id) WHERE state = 'running'")
-            try execute("CREATE TABLE requests (request_id TEXT PRIMARY KEY, session_id TEXT NOT NULL REFERENCES sessions(id), prompt TEXT NOT NULL, run_id TEXT NOT NULL UNIQUE REFERENCES runs(id))")
-            try execute("CREATE TABLE events (sequence INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL REFERENCES sessions(id), run_id TEXT REFERENCES runs(id), kind TEXT NOT NULL, text TEXT, timestamp REAL NOT NULL)")
-            try execute("CREATE INDEX session_events ON events(session_id, sequence)")
-            try execute("PRAGMA user_version = 1")
+            if version == 0 {
+                try execute("CREATE TABLE requests (request_id TEXT PRIMARY KEY, session_id TEXT NOT NULL REFERENCES sessions(id), prompt TEXT NOT NULL, run_id TEXT NOT NULL UNIQUE REFERENCES runs(id))")
+                try execute("CREATE TABLE events (sequence INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT NOT NULL REFERENCES sessions(id), run_id TEXT REFERENCES runs(id), kind TEXT NOT NULL, text TEXT, timestamp REAL NOT NULL)")
+                try execute("CREATE INDEX session_events ON events(session_id, sequence)")
+            }
+            try execute("CREATE TABLE provider_profiles (id TEXT PRIMARY KEY, snapshot TEXT NOT NULL)")
+            try execute("CREATE TABLE model_histories (run_id TEXT PRIMARY KEY REFERENCES runs(id), blob_id TEXT NOT NULL)")
+            try execute("CREATE TABLE tool_invocations (id TEXT PRIMARY KEY, run_id TEXT NOT NULL REFERENCES runs(id), call_id TEXT NOT NULL, state TEXT NOT NULL CHECK(state IN ('pendingApproval','approved','executing','completed','denied','failed','cancelled','unknown')), snapshot TEXT NOT NULL, UNIQUE(run_id, call_id))")
+            try execute("CREATE INDEX run_invocations ON tool_invocations(run_id)")
+            guard try query("PRAGMA foreign_key_check").isEmpty else {
+                throw LatheError.storage("마이그레이션 후 참조 무결성 검증에 실패했습니다.")
+            }
+            try execute("PRAGMA user_version = 2")
         }
+    }
+
+    private func encode<T: Encodable>(_ value: T) throws -> String {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        return String(decoding: try encoder.encode(value), as: UTF8.self)
+    }
+
+    private func decode<T: Decodable>(_ value: String) throws -> T {
+        do { return try JSONDecoder().decode(T.self, from: Data(value.utf8)) }
+        catch { throw LatheError.storage("저장된 실행 메타데이터를 읽을 수 없습니다.") }
     }
 
     private func touch(_ sessionID: UUID, at date: Date) throws {
@@ -281,7 +474,8 @@ public final class SQLiteStore {
     private func decodeRun(_ row: [Value]) throws -> RunSnapshot {
         guard let state = RunState(rawValue: try string(row[4])) else { throw LatheError.storage("잘못된 실행 상태입니다.") }
         let finishedAt: Date? = if case .null = row[6] { nil } else { try date(row[6]) }
-        return RunSnapshot(id: try uuid(row[0]), sessionID: try uuid(row[1]), prompt: try string(row[2]), response: try string(row[3]), state: state, startedAt: try date(row[5]), finishedAt: finishedAt)
+        let configuration: RunConfiguration? = try optionalString(row[7]).map { try decode($0) }
+        return RunSnapshot(id: try uuid(row[0]), sessionID: try uuid(row[1]), prompt: try string(row[2]), response: try string(row[3]), state: state, startedAt: try date(row[5]), finishedAt: finishedAt, configuration: configuration)
     }
 
     private enum Value {

@@ -33,7 +33,14 @@ struct EngineService: Sendable {
             case "createSession":
                 result = .init(session: try await runtime.createSession(title: require(p.title, "title"), workspacePath: require(p.workspacePath, "workspacePath")))
             case "submit":
-                result = .init(run: try await runtime.submit(sessionID: require(p.sessionID, "sessionID"), prompt: require(p.prompt, "prompt"), requestID: require(p.requestID, "requestID")))
+                result = .init(run: try await runtime.submit(sessionID: require(p.sessionID, "sessionID"), prompt: require(p.prompt, "prompt"), requestID: require(p.requestID, "requestID"), configuration: p.configuration))
+            case "providerProfiles": result = .init(profiles: try await runtime.providerProfiles())
+            case "saveProviderProfile":
+                result = .init(profiles: try await runtime.saveProviderProfile(require(p.profile, "profile"), apiKey: p.apiKey, clearCredential: p.clearCredential ?? false))
+            case "invocations": result = .init(invocations: try await runtime.invocations(runID: require(p.runID, "runID")))
+            case "invocation": result = .init(invocation: try await runtime.invocation(id: require(p.invocationID, "invocationID")))
+            case "decideApproval":
+                result = .init(invocation: try await runtime.decideApproval(invocationID: require(p.invocationID, "invocationID"), requestHash: require(p.requestHash, "requestHash"), approved: require(p.approved, "approved")))
             case "cancel": result = .init(run: try await runtime.cancel(runID: require(p.runID, "runID")))
             case "events": result = .init(page: try await runtime.events(after: p.cursor ?? 0, sessionID: p.sessionID, runID: p.runID, limit: p.limit ?? 256))
             default: throw RPCFailure(code: -32601, message: "Unknown engine method: \(request.method.prefix(64))")

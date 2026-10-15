@@ -14,7 +14,14 @@ public actor EngineClient {
         if let executableURL {
             try await EngineBootstrap.ensureRunning(paths: paths, executableURL: executableURL)
         }
-        guard let info = try await call("handshake").info else { throw malformedResponse() }
+        let result: RPCResult
+        do { result = try await call("handshake") }
+        catch let error as RPCFailure where error.code == -32001 {
+            let legacy = try? await call("handshake", params: .init(protocolVersion: 1))
+            let identity = legacy?.info.map { " (PID \($0.processID))" } ?? ""
+            throw LatheError.transport("실행 중인 이전 엔진\(identity)과 호환되지 않습니다. 기존 엔진을 종료한 뒤 다시 연결하세요. 실행 중인 작업은 자동으로 종료하지 않았습니다.")
+        }
+        guard let info = result.info else { throw malformedResponse() }
         guard info.protocolVersion == EngineProtocol.version else {
             throw LatheError.incompatibleVersion(info.protocolVersion)
         }
@@ -49,8 +56,37 @@ public actor EngineClient {
     }
 
     public func submit(sessionID: UUID, prompt: String, requestID: UUID = UUID()) async throws -> RunSnapshot {
-        guard let run = try await call("submit", params: .init(sessionID: sessionID, requestID: requestID, prompt: prompt)).run else { throw malformedResponse() }
+        try await submitConfigured(sessionID: sessionID, prompt: prompt, requestID: requestID, configuration: nil)
+    }
+
+    public func submitConfigured(sessionID: UUID, prompt: String, requestID: UUID = UUID(), configuration: RunConfiguration?) async throws -> RunSnapshot {
+        guard let run = try await call("submit", params: .init(sessionID: sessionID, requestID: requestID, prompt: prompt, configuration: configuration)).run else { throw malformedResponse() }
         return run
+    }
+
+    public func providerProfiles() async throws -> [ProviderProfile] {
+        guard let profiles = try await call("providerProfiles").profiles else { throw malformedResponse() }
+        return profiles
+    }
+
+    public func saveProviderProfile(_ profile: ProviderProfile, apiKey: String? = nil, clearCredential: Bool = false) async throws -> [ProviderProfile] {
+        guard let profiles = try await call("saveProviderProfile", params: .init(profile: profile, apiKey: apiKey, clearCredential: clearCredential)).profiles else { throw malformedResponse() }
+        return profiles
+    }
+
+    public func invocations(runID: UUID) async throws -> [ToolInvocationSnapshot] {
+        guard let items = try await call("invocations", params: .init(runID: runID)).invocations else { throw malformedResponse() }
+        return items
+    }
+
+    public func invocation(id: UUID) async throws -> ToolInvocationSnapshot {
+        guard let item = try await call("invocation", params: .init(invocationID: id)).invocation else { throw malformedResponse() }
+        return item
+    }
+
+    public func decideApproval(invocationID: UUID, requestHash: String, approved: Bool) async throws -> ToolInvocationSnapshot {
+        guard let item = try await call("decideApproval", params: .init(invocationID: invocationID, requestHash: requestHash, approved: approved)).invocation else { throw malformedResponse() }
+        return item
     }
 
     public func cancel(runID: UUID) async throws -> RunSnapshot {

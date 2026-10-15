@@ -1,7 +1,7 @@
 import Foundation
 
 public enum RunState: String, Codable, Sendable {
-    case running, completed, cancelled, interrupted
+    case running, completed, cancelled, interrupted, failed
 }
 
 public struct RunSnapshot: Codable, Identifiable, Sendable, Equatable {
@@ -12,10 +12,12 @@ public struct RunSnapshot: Codable, Identifiable, Sendable, Equatable {
     public var state: RunState
     public let startedAt: Date
     public var finishedAt: Date?
+    public let configuration: RunConfiguration?
 
-    public init(id: UUID = UUID(), sessionID: UUID, prompt: String, response: String = "", state: RunState = .running, startedAt: Date = Date(), finishedAt: Date? = nil) {
+    public init(id: UUID = UUID(), sessionID: UUID, prompt: String, response: String = "", state: RunState = .running, startedAt: Date = Date(), finishedAt: Date? = nil, configuration: RunConfiguration? = nil) {
         self.id = id; self.sessionID = sessionID; self.prompt = prompt
         self.response = response; self.state = state; self.startedAt = startedAt; self.finishedAt = finishedAt
+        self.configuration = configuration
     }
 }
 
@@ -50,7 +52,7 @@ public struct SessionPage: Codable, Sendable {
 }
 
 public enum EventKind: String, Codable, Sendable {
-    case sessionCreated, runStarted, textDelta, runCompleted, runCancelled, runInterrupted
+    case sessionCreated, runStarted, textDelta, runCompleted, runCancelled, runInterrupted, runFailed, toolUpdated
 }
 
 public struct EngineEvent: Codable, Identifiable, Sendable, Equatable {
@@ -81,7 +83,7 @@ public struct EngineInfo: Codable, Sendable {
     public let processID: Int32
     public let engineID: UUID
     public let mode: String
-    public init(protocolVersion: Int = 1, processID: Int32, engineID: UUID, mode: String = "mock") {
+    public init(protocolVersion: Int = 2, processID: Int32, engineID: UUID, mode: String = "mock") {
         self.protocolVersion = protocolVersion; self.processID = processID; self.engineID = engineID; self.mode = mode
     }
 }

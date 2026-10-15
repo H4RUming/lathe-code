@@ -70,3 +70,7 @@ DerivedData/
 *.sqlite
 *.sqlite-wal
 *.sqlite-shm
+
+# Python verification scripts
+__pycache__/
+*.pyc

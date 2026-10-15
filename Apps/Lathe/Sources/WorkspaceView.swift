@@ -97,9 +97,9 @@ private struct WelcomeView: View {
                 .buttonStyle(.borderedProminent).controlSize(.large)
                 .disabled(!model.isConnected || model.isCreatingSession)
             VStack(spacing: 7) {
-                MockBadge()
-                Text("현재는 세션 저장·스트리밍·중단을 확인하는 모의 모델입니다.")
-                Text("프로젝트 파일을 읽거나 수정하지 않으며 외부 API를 호출하지 않습니다.")
+                Text("설정에서 OpenAI 또는 OpenAI 호환 모델 서버를 연결하세요.")
+                Text("실제 모델은 도구 권한에 따라 프로젝트 파일과 명령을 사용할 수 있습니다.")
+                SettingsLink { Label("모델 연결 설정", systemImage: "gearshape") }
             }.font(.caption).foregroundStyle(.secondary)
             if !model.isConnected {
                 Button("엔진에 다시 연결") { Task { await model.connect() } }.disabled(model.isConnecting)
@@ -121,7 +121,9 @@ private struct ConversationView: View {
                     .font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
                     .textSelection(.enabled)
                 Spacer()
-                MockBadge()
+                if let profile = session.activeRun?.configuration?.profile ?? model.selectedProfile {
+                    Label(profile.name, systemImage: "network").font(.caption).foregroundStyle(.secondary)
+                } else { MockBadge() }
             }.padding(.horizontal, 24).padding(.vertical, 14)
             Divider()
             ScrollViewReader { proxy in
@@ -143,11 +145,11 @@ private struct ConversationView: View {
                         if session.runs.isEmpty {
                             VStack(alignment: .leading, spacing: 10) {
                                 Text("첫 메시지를 보내 보세요").font(.title2.weight(.semibold))
-                                Text("응답은 모의 데이터입니다. 이 세션은 GUI와 CLI에서 이어서 열 수 있습니다.")
+                                Text("모델과 도구 권한을 선택하세요. 이 세션은 GUI와 CLI에서 이어서 열 수 있습니다.")
                                     .foregroundStyle(.secondary)
                             }.padding(.top, 34)
                         }
-                        ForEach(session.runs) { run in RunView(run: run) }
+                        ForEach(session.runs) { run in RunView(model: model, run: run) }
                         Color.clear.frame(height: 1).id("transcript-bottom")
                     }
                     .frame(maxWidth: 820, alignment: .leading)
@@ -175,6 +177,7 @@ private struct ConversationView: View {
 }
 
 private struct RunView: View {
+    @ObservedObject var model: LatheAppModel
     let run: RunSnapshot
     var body: some View {
         VStack(alignment: .leading, spacing: 22) {
@@ -192,10 +195,21 @@ private struct RunView: View {
                     if run.state == .running { ProgressView().controlSize(.mini) }
                 }
                 if run.response.isEmpty {
-                    Text(run.state == .running ? "모의 응답을 준비하고 있습니다…" : "응답 내용이 없습니다.")
+                    Text(run.state == .running ? "응답을 준비하고 있습니다…" : "응답 내용이 없습니다.")
                         .foregroundStyle(.secondary)
                 } else {
                     Text(run.response).textSelection(.enabled).lineSpacing(5)
+                }
+            }
+            if let profile = run.configuration?.profile {
+                Text("\(profile.name) · \(profile.model)").font(.caption2).foregroundStyle(.secondary)
+            }
+            if let invocations = model.toolInvocations[run.id], !invocations.isEmpty {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("최근 도구 실행").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                    ForEach(invocations) { invocation in
+                        ToolInvocationView(model: model, invocation: invocation, runIsActive: run.state == .running)
+                    }
                 }
             }
         }.frame(maxWidth: .infinity, alignment: .leading)
@@ -204,9 +218,10 @@ private struct RunView: View {
     private var stateLabel: String {
         switch run.state {
         case .running: "응답 중"
-        case .completed: "완료 · 모의 응답"
+        case .completed: run.configuration?.profile == nil ? "완료 · 모의 응답" : "완료"
         case .cancelled: "사용자가 중단함"
         case .interrupted: "엔진 종료로 중단됨"
+        case .failed: "실행 실패"
         }
     }
 }
@@ -215,6 +230,22 @@ private struct ComposerView: View {
     @ObservedObject var model: LatheAppModel
     var body: some View {
         VStack(spacing: 10) {
+            HStack {
+                Picker("모델", selection: $model.selectedProfileID) {
+                    Text("모의 모델 · 연결 시험").tag(UUID?.none)
+                    ForEach(model.profiles) { profile in Text(profile.name).tag(Optional(profile.id)) }
+                }.frame(maxWidth: 330)
+                Picker("도구 권한", selection: $model.permissionMode) {
+                    Text("수동 승인").tag(PermissionMode.manual)
+                    Text("편집 허용").tag(PermissionMode.acceptEdits)
+                    Text("계획 · 읽기만").tag(PermissionMode.plan)
+                    Text("질문 없이 제한").tag(PermissionMode.dontAsk)
+                }.disabled(model.selectedProfile == nil)
+                SettingsLink { Image(systemName: "gearshape") }.help("모델 연결 설정")
+            }.disabled(!model.canChangeRunConfiguration)
+            if model.selectedProfile != nil {
+                Text(permissionDescription).font(.caption2).foregroundStyle(.secondary)
+            }
             VStack(alignment: .leading, spacing: 10) {
                 TextEditor(text: $model.draft)
                     .font(.body).scrollContentBackground(.hidden)
@@ -248,10 +279,80 @@ private struct ComposerView: View {
             .padding(14)
             .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 14))
             .overlay { RoundedRectangle(cornerRadius: 14).strokeBorder(.quaternary, lineWidth: 1) }
-            Text("모의 모델 · 파일 변경이나 외부 API 호출 없이 연결을 시험합니다.")
-                .font(.caption2).foregroundStyle(.secondary)
+            if model.selectedProfile == nil {
+                Text("모의 모델 · 파일 변경이나 외부 API 호출 없이 연결을 시험합니다.")
+                    .font(.caption2).foregroundStyle(.secondary)
+            }
         }
         .frame(maxWidth: 820).padding(.horizontal, 30).padding(.bottom, 20).padding(.top, 8)
+    }
+
+    private var permissionDescription: String {
+        switch model.permissionMode {
+        case .manual: "읽기는 허용하며 파일 변경과 명령 실행은 매번 승인합니다."
+        case .acceptEdits: "프로젝트 파일 편집은 자동 허용하며 명령 실행은 매번 승인합니다."
+        case .plan: "프로젝트 읽기만 허용합니다. 편집과 명령 실행은 거절합니다."
+        case .dontAsk: "프로젝트 읽기만 허용하며 승인이 필요한 도구는 질문 없이 거절합니다."
+        }
+    }
+}
+
+private struct ToolInvocationView: View {
+    @ObservedObject var model: LatheAppModel
+    let invocation: ToolInvocationSnapshot
+    let runIsActive: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Label(invocation.name, systemImage: invocation.effect == .shell ? "terminal" : "doc.text")
+                    .font(.callout.weight(.semibold))
+                Spacer()
+                Text(status).font(.caption).foregroundStyle(.secondary)
+            }
+            Text(invocation.summary).font(.caption).textSelection(.enabled)
+            if invocation.effect == .shell {
+                Text("이 명령은 macOS 사용자 권한으로 실행하며 파일·네트워크 접근을 sandbox로 제한하지 않습니다.")
+                    .font(.caption).foregroundStyle(.orange)
+            }
+            if invocation.state == .pendingApproval {
+                Text("실행할 정확한 인자").font(.caption.weight(.medium))
+                ScrollView {
+                    Text(invocation.arguments).font(.caption.monospaced()).textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }.frame(maxHeight: 180)
+                HStack {
+                    Spacer()
+                    Button("거절") { model.decideApproval(invocation, approved: false) }
+                    Button("이번 한 번 허용") { model.decideApproval(invocation, approved: true) }
+                        .buttonStyle(.borderedProminent)
+                }.disabled(!model.isConnected || !runIsActive || model.decidingApprovals.contains(invocation.id))
+            } else {
+                DisclosureGroup("요청 인자") {
+                    Text(invocation.arguments).font(.caption.monospaced()).textSelection(.enabled)
+                }
+            }
+            if let output = invocation.output, !output.isEmpty {
+                DisclosureGroup("실행 결과") {
+                    Text(output).font(.caption.monospaced()).textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+        }
+        .padding(14).background(.quaternary.opacity(0.3), in: RoundedRectangle(cornerRadius: 10))
+    }
+
+    private var status: String {
+        switch invocation.state {
+        case .pendingApproval: "승인 대기"
+        case .approved: "승인됨"
+        case .executing: "실행 중"
+        case .completed: "완료"
+        case .denied: "거절됨"
+        case .failed: "실패"
+        case .cancelled: "취소됨"
+        case .unknown: "결과 불명 · 자동 재실행 안 함"
+        }
     }
 }
 

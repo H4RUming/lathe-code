@@ -98,6 +98,59 @@ struct AppModelTests {
         #expect(await engine.connectionCount == 1)
     }
 
+    @Test func realSubmissionFreezesConnectionAndPermissionBeforeAsyncWork() async throws {
+        let engine = FixtureEngine()
+        await engine.holdSubmission()
+        let model = LatheAppModel(client: engine)
+        await model.connect()
+        model.selectedProfileID = engine.profile.id
+        model.permissionMode = .acceptEdits
+        model.draft = "real fixture request"
+        model.sendPrompt()
+        // Settings changing while the submit task starts must not change its payload.
+        model.selectedProfileID = nil
+        model.permissionMode = .plan
+        try await waitUntil { await engine.submissionCount == 1 }
+        #expect(await engine.submittedConfiguration?.profile == engine.profile)
+        #expect(await engine.submittedConfiguration?.permissionMode == .acceptEdits)
+        await engine.releaseSubmission()
+        try await waitUntil { !model.isSubmitting }
+        #expect(model.draft.isEmpty)
+    }
+
+    @Test func approvalUsesDisplayedHashAndIgnoresLateResultAfterSessionChange() async throws {
+        let engine = FixtureEngine()
+        let invocation = await engine.seedApproval()
+        await engine.holdApproval()
+        let model = LatheAppModel(client: engine)
+        await model.connect()
+        #expect(model.toolInvocations[invocation.runID]?.first == invocation)
+        model.decideApproval(invocation, approved: true)
+        try await waitUntil { await engine.approvalCount == 1 }
+        #expect(await engine.approvalHash == invocation.requestHash)
+        model.selectSession(engine.secondID)
+        await engine.releaseApproval()
+        try await waitUntil { model.decidingApprovals.isEmpty && model.selectedSession?.id == engine.secondID }
+        #expect(model.toolInvocations[invocation.runID] == nil)
+        model.decideApproval(invocation, approved: true)
+        #expect(await engine.approvalCount == 1)
+        #expect(model.errorMessage == nil)
+    }
+
+    @Test func savingConnectionDuringRunDoesNotReplaceItsFrozenProfile() async throws {
+        let engine = FixtureEngine()
+        let invocation = await engine.seedApproval()
+        let model = LatheAppModel(client: engine)
+        await model.connect()
+        model.selectedProfileID = engine.profile.id
+        var updated = engine.profile
+        updated.model = "new-fixture-model"
+        #expect(await model.saveProfile(updated, apiKey: nil, clearCredential: false))
+        #expect(model.profiles == [updated])
+        #expect(model.selectedSession?.activeRun?.configuration?.profile == engine.profile)
+        #expect(model.toolInvocations[invocation.runID]?.first == invocation)
+    }
+
     private func waitUntil(_ condition: @MainActor () async -> Bool) async throws {
         for _ in 0..<200 {
             if await condition() { return }
@@ -112,6 +165,14 @@ private enum CheckFailure: Error { case timedOut }
 private actor FixtureEngine: AppEngineClient {
     nonisolated let firstID = UUID()
     nonisolated let secondID = UUID()
+    nonisolated let profile = ProviderProfile(name: "Fixture", api: .openAIChat, baseURL: "https://model.example.test/v1", model: "fixture-model")
+    private var savedProfile: ProviderProfile?
+    private var tool: ToolInvocationSnapshot?
+    private var holdsApproval = false
+    private var approvalGate: CheckedContinuation<Void, Never>?
+    private(set) var submittedConfiguration: RunConfiguration?
+    private(set) var approvalCount = 0
+    private(set) var approvalHash: String?
     private var completedRun: RunSnapshot?
     private var failSnapshot = false
     private var hasEvent = false
@@ -156,6 +217,38 @@ private actor FixtureEngine: AppEngineClient {
         if holdsSubmission { await withCheckedContinuation { submissionGate = $0 } }
         return RunSnapshot(sessionID: sessionID, prompt: prompt, response: "done", state: .completed)
     }
+
+    func providerProfiles() async throws -> [ProviderProfile] { [savedProfile ?? profile] }
+    func saveProviderProfile(_ profile: ProviderProfile, apiKey: String?, clearCredential: Bool) async throws -> [ProviderProfile] {
+        savedProfile = profile
+        return [profile]
+    }
+    func submitConfigured(sessionID: UUID, prompt: String, requestID: UUID, configuration: RunConfiguration?) async throws -> RunSnapshot {
+        submittedConfiguration = configuration
+        return try await submit(sessionID: sessionID, prompt: prompt, requestID: requestID)
+    }
+    func invocations(runID: UUID) async throws -> [ToolInvocationSnapshot] {
+        guard let tool, tool.runID == runID else { return [] }
+        return [tool]
+    }
+    func decideApproval(invocationID: UUID, requestHash: String, approved: Bool) async throws -> ToolInvocationSnapshot {
+        approvalCount += 1
+        approvalHash = requestHash
+        if holdsApproval { await withCheckedContinuation { approvalGate = $0 } }
+        guard var snapshot = tool, snapshot.id == invocationID else { throw LatheError.notFound("fixture approval missing") }
+        snapshot.state = approved ? .approved : .denied
+        tool = snapshot
+        return snapshot
+    }
+    func seedApproval() -> ToolInvocationSnapshot {
+        let run = RunSnapshot(sessionID: firstID, prompt: "fixture approval", configuration: RunConfiguration(profile: profile))
+        completedRun = run
+        let snapshot = ToolInvocationSnapshot(runID: run.id, callID: "fixture-call", name: "write_file", arguments: "{}", requestHash: String(repeating: "a", count: 64), summary: "Write fixture", effect: .write, state: .pendingApproval)
+        tool = snapshot
+        return snapshot
+    }
+    func holdApproval() { holdsApproval = true }
+    func releaseApproval() { holdsApproval = false; approvalGate?.resume(); approvalGate = nil }
 
     func cancel(runID: UUID) async throws -> RunSnapshot {
         RunSnapshot(id: runID, sessionID: firstID, prompt: "", state: .cancelled)

@@ -1,7 +1,7 @@
 # 기능 동등성 구현·검증·커밋 계획
 
-2026-10-15 기준. **M0의 앱·공통 엔진·CLI·저장소 수직 흐름을 구현했으며 M0 전체는 진행 중이다.**
-현재 실행 방법과 검증 범위는 [개발 가이드](development.md)를 따른다. M1 이후는 미구현이다.
+2026-10-15 기준. **M0 실행 기반에 M1의 첫 실제 모델·도구 흐름을 연결했다. M0 기술 검증과 M1 전체는 진행 중이다.**
+현재 실행 방법과 검증 범위는 [개발 가이드](development.md)와 [첫 코딩 흐름](coding-preview.md)을 따른다. M2 이후는 목표 범위다.
 [기능 요구사항](features.md)의 LAT-* ID와 [확장 계약](extensions.md)의 X1–X9를 구현·검증에 연결한다.
 전체 구조는 [architecture.md](architecture.md), 모델 연결은 [providers.md](providers.md)를 따른다.
 [추론·Ultra](reasoning-and-ultra.md)와 [도구·MCP 제작](tools-and-mcp-authoring.md)의 상세 검증도 포함한다.
@@ -54,7 +54,8 @@ SQLite WAL journal, mock 스트리밍·취소·재접속·crash recovery, packag
 runner/pipe/PTY·원래 process group 취소와 helper intent/result journal을 추가했다.
 sandbox fixture probe는 host에서 통과했지만 production backend는 아니다.
 LLDB-DAP 발견·initialize는 성공했고 실제 launch/attach는 host timeout으로 미완료다.
-일반 blob store와 engine ToolInvocation 연결, sandbox 적용 backend는 아직 남아 있다.
+일반 blob store와 engine ToolInvocation 승인·실행 기록을 첫 coding loop에 연결했다.
+sandbox 적용 backend, PTY renderer 결정과 debugger 실행 게이트는 남아 있다.
 최소 OS 실행과 GitHub Actions 원격 실행 결과는 로컬 빌드 성공과 별도로 확인한다.
 
 - Xcode 앱·로컬 Package·Swift 6 설정, 최소 UI/mock provider, macOS CI build.
@@ -70,6 +71,14 @@ GUI 창을 닫고 CLI로 다시 연결해 동일 mock 작업을 확인한다. �
 검증되지 않은 sandbox/PTY 조합은 분명하게 남기고 필요한 대안을 결정한다.
 
 ### M1 — 공통 coding loop
+
+**구현된 첫 묶음:** Responses/Chat 스트리밍 adapter, 네이티브 연결 설정과 endpoint에 묶인 Keychain 키,
+GUI/CLI 공통 loop, Manual/Accept edits/Plan/Don't ask, 정확한 요청 hash에 대한 일회 승인,
+list/read/write/run_command, SHA precondition과 변경 전/결과 blob, 비대화형 native runner,
+취소·불명확한 실행 복구·자동 replay 금지. 최대 단계·호출 수 등 기본 한도를 적용한다.
+기본 앱은 mock이며 저장된 연결을 선택해야 실제 도구가 동작한다.
+실제 서비스/원격 vLLM 검증, 코드·웹 검색, 풍부한 편집·diff, 실행 profile과 테스트 증거,
+token/비용 budget·steering·Off/On capability는 남았다. 아래 목록과 게이트 전체를 완료한 것은 아니다.
 
 - 연결 설정·Keychain·환경 profile·URL prefix와 원격 인증.
 - OpenAI Responses와 OpenAI-compatible Chat(vLLM)의 첫 adapter, stream/tool 결과 왕복.
@@ -218,8 +227,8 @@ Claude와 Lathe 차등 검증은 사용자 동작·설정 계약을 비교하며
 
 ## 5. 다음 구현 단위
 
-Swift 앱/engine/CLI mock 흐름과 별도 runner의 pipe·process group 취소·PTY 검증을 구현했다.
-다음은 일반 blob 저장·engine 실행 journal 연결과 M1의 PolicyEngine/ToolBroker·첫 provider다.
+Swift 앱/engine/CLI에 실제 Responses/Chat adapter와 도구 승인·파일·명령·blob·실행 기록을 연결했다.
+다음은 M1의 코드/웹 검색, patch·변경 미리보기, 실행 profile과 테스트 증거, 예산·모델 capability다.
 LLDB launch/attach timeout은 별도 미완료 게이트로 남기며 debugger 제품 연결 전에 해결한다.
 sandbox probe 통과를 production 격리 완료로 확대하지 않는다.
-실제 모델이나 도구 실행이 없는 현재 상태를 coding loop 완료로 표시하지 않는다.
+HTTP fixture 왕복과 실제 파일/명령 실행 검증을 live OpenAI/vLLM 호환성이나 M1 전체 완료로 확대하지 않는다.

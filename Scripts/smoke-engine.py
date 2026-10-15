@@ -86,7 +86,7 @@ def main():
             assert len({info["engineID"] for info in infos}) == 1
             assert len(owned) == 1
             first = infos[0]
-            assert first["mode"] == "mock" and first["protocolVersion"] == 1
+            assert first["mode"] == "coding-preview" and first["protocolVersion"] == 2
             print("PASS concurrent clients bootstrap one engine", flush=True)
 
             # Foundation may preserve /var where Python resolves /private/var.
@@ -98,11 +98,11 @@ def main():
                           Path("/private/tmp") / f"lathe-{os.geteuid()}-{digest}" / "engine.sock"]
             socket_path = next((path for path in candidates if path.is_socket()), None)
             assert socket_path is not None, candidates
-            envelope = {"jsonrpc": "2.0", "id": "smoke", "method": "handshake", "params": {"protocolVersion": 1}}
+            envelope = {"jsonrpc": "2.0", "id": "smoke", "method": "handshake", "params": {"protocolVersion": 2}}
             assert rpc(envelope)["result"]["info"]["engineID"] == first["engineID"]
             envelope["params"]["protocolVersion"] = 999
             assert rpc(envelope)["error"]["code"] == -32001
-            envelope["params"]["protocolVersion"] = 1
+            envelope["params"]["protocolVersion"] = 2
             envelope["method"] = "unknown"
             assert rpc(envelope)["error"]["code"] == -32601
             assert rpc({"jsonrpc": "2.0"})["error"]["code"] == -32600

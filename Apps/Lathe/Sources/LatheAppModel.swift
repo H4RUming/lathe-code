@@ -10,8 +10,28 @@ protocol AppEngineClient: Sendable {
     func session(id: UUID, beforeRunID: UUID?, limit: Int) async throws -> SessionSnapshot
     func createSession(title: String, workspacePath: String) async throws -> SessionSnapshot
     func submit(sessionID: UUID, prompt: String, requestID: UUID) async throws -> RunSnapshot
+    func submitConfigured(sessionID: UUID, prompt: String, requestID: UUID, configuration: RunConfiguration?) async throws -> RunSnapshot
+    func providerProfiles() async throws -> [ProviderProfile]
+    func saveProviderProfile(_ profile: ProviderProfile, apiKey: String?, clearCredential: Bool) async throws -> [ProviderProfile]
+    func invocations(runID: UUID) async throws -> [ToolInvocationSnapshot]
+    func decideApproval(invocationID: UUID, requestHash: String, approved: Bool) async throws -> ToolInvocationSnapshot
     func cancel(runID: UUID) async throws -> RunSnapshot
     func events(after: Int64, sessionID: UUID?, runID: UUID?, limit: Int) async throws -> EventPage
+}
+
+extension AppEngineClient {
+    func providerProfiles() async throws -> [ProviderProfile] { [] }
+    func invocations(runID: UUID) async throws -> [ToolInvocationSnapshot] { [] }
+    func submitConfigured(sessionID: UUID, prompt: String, requestID: UUID, configuration: RunConfiguration?) async throws -> RunSnapshot {
+        guard configuration?.profile == nil else { throw LatheError.invalidRequest("이 연결은 실제 모델을 지원하지 않습니다.") }
+        return try await submit(sessionID: sessionID, prompt: prompt, requestID: requestID)
+    }
+    func saveProviderProfile(_ profile: ProviderProfile, apiKey: String?, clearCredential: Bool) async throws -> [ProviderProfile] {
+        throw LatheError.invalidRequest("Provider 설정을 저장할 수 없습니다.")
+    }
+    func decideApproval(invocationID: UUID, requestHash: String, approved: Bool) async throws -> ToolInvocationSnapshot {
+        throw LatheError.invalidRequest("도구 승인을 처리할 수 없습니다.")
+    }
 }
 
 extension EngineClient: AppEngineClient {}
@@ -30,6 +50,12 @@ final class LatheAppModel: ObservableObject {
     @Published private(set) var isCancelling = false
     @Published private(set) var isLoadingEarlier = false
     @Published private(set) var earlierCursor: UUID?
+    @Published private(set) var profiles: [ProviderProfile] = []
+    @Published var selectedProfileID: UUID?
+    @Published var permissionMode: PermissionMode = .manual
+    @Published private(set) var toolInvocations: [UUID: [ToolInvocationSnapshot]] = [:]
+    @Published private(set) var decidingApprovals: Set<UUID> = []
+    @Published private(set) var isSavingProfile = false
     @Published var draft = ""
     @Published var errorMessage: String?
 
@@ -46,11 +72,15 @@ final class LatheAppModel: ObservableObject {
         self.client = client
     }
 
+    var selectedProfile: ProviderProfile? { profiles.first { $0.id == selectedProfileID } }
+    var canChangeRunConfiguration: Bool { selectedSession?.activeRun == nil && !isSubmitting }
+
     var draftByteCount: Int { draft.utf8.count }
     var isDraftOverLimit: Bool { draftByteCount > Self.promptByteLimit }
 
     var canSubmit: Bool {
         isConnected && selectedSession != nil && selectedSession?.activeRun == nil
+            && (selectedProfileID == nil || selectedProfile != nil)
             && !isSubmitting && !isDraftOverLimit && !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
@@ -98,9 +128,11 @@ final class LatheAppModel: ObservableObject {
             guard let client else { return }
             let info = try await client.connect()
             let latest = try await client.listSessions()
+            let latestProfiles = try await client.providerProfiles()
             guard generation == connectionGeneration, !Task.isCancelled else { return }
             engineInfo = info
             sessions = latest
+            profiles = latestProfiles
             isConnected = true
             if let selectedSessionID, latest.contains(where: { $0.id == selectedSessionID }) {
                 try await refreshSelectedSession(using: client)
@@ -137,6 +169,7 @@ final class LatheAppModel: ObservableObject {
         selectionGeneration &+= 1
         selectedSessionID = id
         selectedSession = nil
+        toolInvocations = [:]
         earlierCursor = nil
         isLoadingEarlier = false
         draft = id.flatMap { drafts[$0] } ?? ""
@@ -166,12 +199,17 @@ final class LatheAppModel: ObservableObject {
         guard canSubmit, let client, let sessionID = selectedSessionID else { return }
         let prompt = draft
         let requestID = UUID()
+        let configuration = selectedProfile.map { RunConfiguration(profile: $0, permissionMode: permissionMode) }
         isSubmitting = true
         errorMessage = nil
         Task {
             defer { isSubmitting = false }
             do {
-                _ = try await client.submit(sessionID: sessionID, prompt: prompt, requestID: requestID)
+                if let configuration {
+                    _ = try await client.submitConfigured(sessionID: sessionID, prompt: prompt, requestID: requestID, configuration: configuration)
+                } else {
+                    _ = try await client.submit(sessionID: sessionID, prompt: prompt, requestID: requestID)
+                }
             } catch {
                 if let failure = error as? RPCFailure,
                    [-32600, -32601, -32602, -32004, -32009].contains(failure.code) {
@@ -204,6 +242,7 @@ final class LatheAppModel: ObservableObject {
                 current.runs = mergedRuns(older: page.runs, newer: current.runs)
                 selectedSession = current
                 earlierCursor = page.nextBeforeRunID
+                try await refreshTools(for: page.runs, using: client, generation: generation)
             } catch {
                 guard generation == selectionGeneration else { return }
                 errorMessage = "이전 대화를 읽지 못했습니다. \(error.localizedDescription)"
@@ -262,9 +301,57 @@ final class LatheAppModel: ObservableObject {
                 earlierCursor = snapshot.nextBeforeRunID
             }
             selectedSession = snapshot
+            try await refreshTools(for: snapshot.runs, using: client, generation: generation)
         } catch {
             guard generation == selectionGeneration else { return }
             throw error
+        }
+    }
+
+    private func refreshTools(for runs: [RunSnapshot], using client: any AppEngineClient, generation: UInt64) async throws {
+        for run in runs where run.configuration?.profile != nil {
+            if run.state != .running, toolInvocations[run.id] != nil, !runs.suffix(4).contains(where: { $0.id == run.id }) { continue }
+            let latest = try await client.invocations(runID: run.id)
+            guard generation == selectionGeneration else { return }
+            toolInvocations[run.id] = latest
+        }
+    }
+
+    func saveProfile(_ profile: ProviderProfile, apiKey: String?, clearCredential: Bool) async -> Bool {
+        guard let client, isConnected, !isSavingProfile else { return false }
+        isSavingProfile = true
+        defer { isSavingProfile = false }
+        do {
+            try profile.validate()
+            profiles = try await client.saveProviderProfile(profile, apiKey: apiKey, clearCredential: clearCredential)
+            if canChangeRunConfiguration { selectedProfileID = profile.id }
+            return true
+        } catch {
+            errorMessage = "모델 연결을 저장하지 못했습니다. \(error.localizedDescription)"
+            return false
+        }
+    }
+
+    func decideApproval(_ invocation: ToolInvocationSnapshot, approved: Bool) {
+        guard let client, isConnected, !decidingApprovals.contains(invocation.id),
+              selectedSession?.activeRun?.id == invocation.runID,
+              toolInvocations[invocation.runID]?.contains(where: {
+                  $0.id == invocation.id && $0.state == .pendingApproval && $0.requestHash == invocation.requestHash
+              }) == true else { return }
+        let generation = selectionGeneration
+        decidingApprovals.insert(invocation.id)
+        Task {
+            defer { decidingApprovals.remove(invocation.id) }
+            do {
+                let updated = try await client.decideApproval(invocationID: invocation.id, requestHash: invocation.requestHash, approved: approved)
+                guard generation == selectionGeneration else { return }
+                if let index = toolInvocations[invocation.runID]?.firstIndex(where: { $0.id == invocation.id }) {
+                    toolInvocations[invocation.runID]?[index] = updated
+                }
+            } catch {
+                guard generation == selectionGeneration else { return }
+                errorMessage = "승인 상태를 확인하지 못했습니다. \(error.localizedDescription)"
+            }
         }
     }
 

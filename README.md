@@ -6,14 +6,14 @@ Swift로 만드는 개인용 macOS 코딩 에이전트. Claude Code와 동등한
 Vertex AI, Anthropic Claude, vLLM, Ollama 및 기타 모델 서버를 지원할 계획입니다.
 모델 서버는 같은 Mac, LAN, 외부 서버 어디에나 둘 수 있습니다.
 
-현재 **M0 실행 기반을 구현 중**입니다. SwiftUI/AppKit 앱과 CLI가 별도 Swift 엔진에
-연결되어 세션 생성, 모의 응답 스트리밍, 중단, 대화 이력 조회와 재접속을 제공합니다.
-SQLite에 작업과 이벤트를 저장하며 엔진 재시작 시 미완료 작업을 `interrupted`로 복구합니다.
-별도 네이티브 실행 helper에 pipe/PTY 입출력, 명령 취소·시간/출력 제한과 실행 기록을 추가했습니다.
-이 helper는 개발 검증용이며 [실행 계약](docs/runner.md)에 범위와 제약을 기록합니다.
+현재 **M1의 첫 코딩 흐름을 구현 중**입니다. SwiftUI/AppKit 앱과 CLI가 같은 Swift 엔진에
+연결되며 OpenAI Responses 또는 OpenAI 호환 Chat API를 통해 파일 읽기·쓰기와 명령 실행을
+이어갑니다. 네이티브 모델 설정, Keychain 인증, 도구별 승인, SQLite 실행 기록과 blob을 제공합니다.
 
-실제 모델·파일 편집·터미널·검색·MCP·Ultra는 후속 단계입니다. 현재 앱은 **mock 모드**를
-명시하며 프로젝트 파일을 변경하거나 모델 API를 호출하지 않습니다.
+기본 선택은 **mock 모드**입니다. 설정에서 연결을 저장하고 작성창에서 선택한 실행만 실제 모델과
+도구를 사용합니다. 명령은 승인 후 **sandbox 없이 이 Mac에서 실행**됩니다.
+현재 범위·한도·사용법은 [첫 코딩 흐름](docs/coding-preview.md)을 참고하세요.
+실제 OpenAI/vLLM/Ollama 서버 검증, 검색·MCP·Ultra와 전체 기능 동등성은 아직 완료하지 않았습니다.
 
 ## 빌드와 실행
 
@@ -25,7 +25,8 @@ open .build/macos/Lathe.app
 ```
 
 Xcode에서는 `Apps/Lathe/Lathe.xcodeproj`의 **Lathe** scheme을 실행합니다.
-앱의 **프로젝트 열기**로 폴더를 고르고 요청을 전송하면 모의 스트림이 시작됩니다.
+앱의 **프로젝트 열기**로 폴더를 고릅니다. `⌘,`에서 모델 연결을 저장하고 작성창에서 선택하면
+실제 코딩 흐름을 사용하며, **모의 모델**은 외부 호출 없이 연결을 시험합니다.
 앱을 닫아도 엔진은 유지되며 같은 사용자의 CLI가 동일한 세션에 연결됩니다.
 
 ```sh

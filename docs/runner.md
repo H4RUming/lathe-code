@@ -1,9 +1,10 @@
-# M0 실행 helper 계약
+# 네이티브 실행 helper 계약
 
 2026-10-15. `LatheExecution`은 Swift 실행 라이브러리, `lathe-runner`는 별도 네이티브
-개발 helper다. `LAT-TOOL-007/008`, EXEC, PERM의 기반이며 전체 요구사항 완료가 아니다.
-앱에 바이너리는 포함되지만 현재 mock engine에는 연결하지 않는다. M1에서 공통
-ToolBroker/PolicyEngine을 거친 승인된 실행만 연결한다.
+실행 helper다. `LAT-TOOL-007/008`, EXEC, PERM의 기반이며 전체 요구사항 완료가 아니다.
+M1 첫 coding loop에서 공통 ToolBroker/PolicyEngine을 거친 승인된 `run_command`를 연결했다.
+모델 도구는 비대화형 pipe 실행이며 아래 PTY 제어는 아직 앱 터미널에 연결하지 않았다.
+제품 사용 계약과 실제 승인 범위는 [첫 코딩 흐름](coding-preview.md)을 따른다.
 
 ## 실행과 수명
 
@@ -77,10 +78,13 @@ helper 종료 코드는 target exit code, signal은 128+signal, 취소 130, time
    fsync한 후 atomic link로 공개하고 디렉터리를 fsync한다. 쓰기는 열린 directory FD를 기준으로 한다.
 
 환경 변수 값은 intent에서 제외하지만 **argv와 프로그램 출력은 그대로 기록**한다. 이를 secret redaction으로
-표시하지 않으며 실제 provider secret은 실행 인자/출력에 넣지 않는다. 일반 blob store·retention·암호화는 후속이다.
+표시하지 않으며 실제 provider secret은 실행 인자/출력에 넣지 않는다. 엔진은 별도의 일반 blob 저장소를
+사용하지만 helper journal의 retention·암호화는 후속이다.
 event stream은 중단 시 마지막 line이 불완전할 수 있다. 유효한 result가 없거나 helper 오류가 있으면
 조사·reconciliation이 필요하며 실행 성공이나 안전한 재실행을 추정하지 않는다.
-이 journal은 M0 helper 전용이며 engine SQLite의 ToolInvocation/receipt 통합은 M1에서 구현한다.
+helper journal은 엔진 데이터 아래 invocation별 디렉터리에 보존한다. 엔진은 SQLite ToolInvocation에
+승인·실행·terminal 상태를 기록하고, bridge가 helper의 event/result 일치를 확인한 뒤 결과 blob을 저장한다.
+엔진 재시작 시 실행 중 호출은 unknown으로 남기며 helper journal을 근거로 자동 재실행하지 않는다.
 
 ## 검증
 

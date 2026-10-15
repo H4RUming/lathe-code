@@ -16,8 +16,8 @@ private struct Arguments {
     var flags: Set<String> = []
 
     init(_ input: [String]) throws {
-        let valued: Set<String> = ["--data-dir", "--engine", "--workspace", "--session", "--request-id", "--after", "--before"]
-        let switches: Set<String> = ["--json", "--detach", "--follow", "--help"]
+        let valued: Set<String> = ["--data-dir", "--engine", "--workspace", "--session", "--request-id", "--after", "--before", "--provider", "--permission", "--max-steps", "--id", "--name", "--api", "--base-url", "--model", "--reasoning-effort", "--hash"]
+        let switches: Set<String> = ["--json", "--detach", "--follow", "--help", "--allow-http", "--key-stdin", "--clear-key"]
         words = []
         var index = 0
         while index < input.count {
@@ -61,7 +61,7 @@ struct LatheCLI {
 
     private static func run(_ args: Arguments, interrupted: InterruptFlag) async throws -> Int32 {
         guard let command = args.words.first, !args.flags.contains("--help") else { print(help); return 0 }
-        let known: Set<String> = ["status", "sessions", "new", "show", "run", "cancel", "events"]
+        let known: Set<String> = ["status", "sessions", "new", "show", "run", "cancel", "events", "providers", "provider-set", "tools", "tool", "approve", "deny"]
         guard known.contains(command) else { throw LatheError.invalidRequest("Unknown command: \(command)\n\(help)") }
         let env = ProcessInfo.processInfo.environment
         let root = args.values["--data-dir"] ?? env["LATHE_DATA_DIR"]
@@ -76,6 +76,40 @@ struct LatheCLI {
         let tail = Array(args.words.dropFirst())
         let json = args.flags.contains("--json")
         switch command {
+        case "providers":
+            let profiles = try await client.providerProfiles()
+            if json { try output(profiles) }
+            else { for profile in profiles { print("\(profile.id)  \(profile.name)  \(profile.api.rawValue)  \(profile.model)  \(profile.baseURL)") } }
+        case "provider-set":
+            guard let name = args.values["--name"], let rawAPI = args.values["--api"], let api = ProviderAPI(rawValue: rawAPI),
+                  let baseURL = args.values["--base-url"], let model = args.values["--model"] else {
+                throw LatheError.invalidRequest("provider-set requires --name, --api openAIResponses|openAIChat, --base-url and --model.")
+            }
+            let profile = ProviderProfile(id: try args.uuid("--id") ?? UUID(), name: name, api: api, baseURL: baseURL,
+                                          model: model, allowInsecureHTTP: args.flags.contains("--allow-http"), reasoningEffort: args.values["--reasoning-effort"])
+            try profile.validate()
+            let key: String?
+            if args.flags.contains("--key-stdin") {
+                guard isatty(STDIN_FILENO) == 0 else { throw LatheError.invalidRequest("API keys must arrive through piped stdin or the app's secure field; never command arguments.") }
+                key = try readPrompt(interrupted: interrupted).trimmingCharacters(in: .newlines)
+            } else { key = nil }
+            _ = try await client.saveProviderProfile(profile, apiKey: key, clearCredential: args.flags.contains("--clear-key"))
+            if json { try output(profile) } else { print(profile.id) }
+        case "tools":
+            let items = try await client.invocations(runID: identifier(tail.first, name: "run ID"))
+            if json { try output(items) }
+            else {
+                for item in items { print("\(item.id) [\(item.state.rawValue)] \(item.summary)\nhash=\(item.requestHash)\n\(item.output ?? "")") }
+                print("Latest 4 tool calls. Use lathe tool INVOCATION_ID for exact arguments.")
+            }
+        case "tool":
+            let item = try await client.invocation(id: identifier(tail.first, name: "invocation ID"))
+            if json { try output(item) }
+            else { print("\(item.id) [\(item.state.rawValue)]\n\(item.summary)\n\(item.arguments)\nhash=\(item.requestHash)\n\(item.output ?? "")") }
+        case "approve", "deny":
+            guard let hash = args.values["--hash"] else { throw LatheError.invalidRequest("Approval requires the exact --hash displayed by lathe tool.") }
+            let item = try await client.decideApproval(invocationID: identifier(tail.first, name: "invocation ID"), requestHash: hash, approved: command == "approve")
+            if json { try output(item) } else { print("\(item.id) \(item.state.rawValue)") }
         case "status":
             if json { try output(info) }
             else { print("Lathe engine \(info.processID) · protocol \(info.protocolVersion) · \(info.mode)\n\(paths.directory.path)") }
@@ -125,8 +159,18 @@ struct LatheCLI {
             }
             try checkInterrupt(interrupted)
             let requestID = try args.uuid("--request-id") ?? UUID()
+            let configuration: RunConfiguration?
+            if let profileID = try args.uuid("--provider") {
+                guard let profile = try await client.providerProfiles().first(where: { $0.id == profileID }) else { throw LatheError.notFound("Model connection not found.") }
+                guard let mode = PermissionMode(rawValue: args.values["--permission"] ?? "dontAsk") else { throw LatheError.invalidRequest("Invalid permission mode.") }
+                guard args.flags.contains("--detach") || mode == .dontAsk || mode == .plan else {
+                    throw LatheError.invalidRequest("Manual/Accept edits runs require --detach, then approve in the app or with lathe approve. Headless runs default to dontAsk.")
+                }
+                guard let maxSteps = Int(args.values["--max-steps"] ?? "12") else { throw LatheError.invalidRequest("Invalid --max-steps.") }
+                configuration = RunConfiguration(profile: profile, permissionMode: mode, maxSteps: maxSteps)
+            } else { configuration = nil }
             let run: RunSnapshot
-            do { run = try await client.submit(sessionID: sessionID, prompt: prompt, requestID: requestID) }
+            do { run = try await client.submitConfigured(sessionID: sessionID, prompt: prompt, requestID: requestID, configuration: configuration) }
             catch { stderr("Submission identity: session=\(sessionID) request=\(requestID). Reuse both to retry without starting a duplicate run."); throw error }
             if interrupted.isSet {
                 let stopped = try await client.cancel(runID: run.id)
@@ -136,9 +180,9 @@ struct LatheCLI {
             if args.flags.contains("--detach") { try output(run); return 0 }
             if run.state != .running {
                 if json { try output(run) } else { print(run.response) }
-                return run.state == .completed ? 0 : 130
+                return run.state == .completed ? 0 : (run.state == .failed ? 1 : 130)
             }
-            stderr("session=\(sessionID) run=\(run.id) request=\(requestID) · mock provider")
+            stderr("session=\(sessionID) run=\(run.id) request=\(requestID) · \(configuration?.profile?.name ?? "mock provider")")
             var cursor: Int64 = 0
             while true {
                 if interrupted.isSet {
@@ -151,9 +195,9 @@ struct LatheCLI {
                 for event in page.events where event.runID == run.id {
                     if json { try output(event) }
                     else if event.kind == .textDelta, let text = event.text { FileHandle.standardOutput.write(Data(text.utf8)) }
-                    if [.runCompleted, .runCancelled, .runInterrupted].contains(event.kind) {
+                    if [.runCompleted, .runCancelled, .runInterrupted, .runFailed].contains(event.kind) {
                         if !json { print("") }
-                        return event.kind == .runCompleted ? 0 : 130
+                        return event.kind == .runCompleted ? 0 : (event.kind == .runFailed ? 1 : 130)
                     }
                 }
                 try await Task.sleep(for: .milliseconds(150))
@@ -221,7 +265,7 @@ struct LatheCLI {
     private static func stderr(_ text: String) { FileHandle.standardError.write(Data((text + "\n").utf8)) }
 
     private static let help = """
-    Lathe — native macOS coding agent foundation (mock provider only)
+    Lathe — native macOS coding agent preview
 
       lathe status [--json]
       lathe sessions [--json]
@@ -230,9 +274,19 @@ struct LatheCLI {
       lathe show SESSION_ID [--before RUN_ID] [--json]
       lathe cancel RUN_ID [--json]
       lathe events [--session UUID] [--after CURSOR] [--follow]
+      lathe providers [--json]
+      lathe provider-set --name NAME --api openAIResponses|openAIChat --base-url URL --model MODEL
+        [--id UUID] [--allow-http] [--key-stdin | --clear-key] [--reasoning-effort VALUE]
+      lathe tools RUN_ID [--json]
+      lathe tool INVOCATION_ID [--json]
+      lathe approve INVOCATION_ID --hash HASH
+      lathe deny INVOCATION_ID --hash HASH
 
     Global: --data-dir /absolute/path, --engine /path/to/lathe-engine
     run: --request-id UUID for an idempotent retry; --json emits NDJSON events.
+    run: --provider UUID selects a saved connection; omitted selects mock.
+         --permission manual|acceptEdits|plan|dontAsk (default dontAsk); --max-steps 1...24.
+         Approval modes require --detach; inspect and approve using the app or tool/approve commands.
     Ctrl-C during run cancels that run. Ctrl-C during events only detaches.
     """
 }

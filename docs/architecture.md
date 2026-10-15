@@ -1,13 +1,17 @@
 # Lathe 상세 아키텍처
 
-설계 기준일: 2026-10-15. 상태: **목표 아키텍처, M0 일부 구현**. 목표는 Swift 네이티브 macOS 앱에서 Claude Code와 동등한 작업 흐름을 제공하고 여러 모델 프로바이더를 선택하는 것이다.
+설계 기준일: 2026-10-15. 상태: **목표 아키텍처, M0 기반·M1 첫 코딩 흐름 구현**. 목표는 Swift 네이티브 macOS 앱에서 Claude Code와 동등한 작업 흐름을 제공하고 여러 모델 프로바이더를 선택하는 것이다.
 
-현재는 `LatheDomain`·`LatheProtocol`·`LathePersistence`·`LatheRuntime`·`LatheEngine`·`LatheCLI`와
-SwiftUI/AppKit 앱이 구현되어 있다. `EngineRuntime` actor가 SQLite C API wrapper를 단독 소유하며
-1 MiB framed JSON-RPC와 cursor polling으로 mock 작업을 공유한다. 아래의 ToolBroker, provider,
-`LatheExecution`과 별도 `lathe-runner`의 pipe/PTY·취소·실행 journal은 개발 helper로 구현했다.
-공통 ToolBroker 연결, 세부 coordinator와 blob store는 후속 목표다. 실제 계약·검증 범위는
-[개발 가이드](development.md)와 [실행 helper](runner.md)에 기록한다.
+현재 `EngineRuntime` actor가 SQLite writer를 소유하고 SwiftUI/AppKit 앱과 CLI가 같은
+1 MiB framed JSON-RPC·cursor polling으로 세션과 실행을 공유한다. `LatheProviders`의 Responses/Chat
+adapter, `LatheTools`의 broker/정책과 네 파일·명령 도구, `LatheExecution` 및 별도 `lathe-runner`,
+내용 주소 기반 blob 저장소를 연결했다. 승인·변경 전 내용·결과 참조를 effect 전에/후에 기록하고
+재시작 후 불명확한 실행을 자동 replay하지 않는다. 기본 선택은 mock이다.
+
+아래의 세부 coordinator, Hooks/MCP, Ultra, production sandbox, 편집기·디버거는 목표 구조다.
+현재 PolicyEngine은 `LatheTools` 안의 작은 구현이며 UI가 executor를 직접 호출하지 않는다.
+실제 구현과 검증 범위는 [첫 코딩 흐름](coding-preview.md), [개발 가이드](development.md),
+[실행 helper](runner.md)에 기록한다. Live provider 검증과 M1 전체 완료는 별도 게이트다.
 
 ## 1. 기준과 문서 경계
 
@@ -33,7 +37,7 @@ SwiftUI/AppKit 앱이 구현되어 있다. `EngineRuntime` actor가 SQLite C API
 | OS/언어 | macOS 15 이상 제안, Swift 6 언어 모드. 최신 SDK 빌드와 최소 OS 검증은 별도 |
 | 빌드 | Xcode 앱 target + 하나의 로컬 Swift Package |
 | 수명 | GUI와 CLI가 동일한 Swift engine에 접속. 창을 닫아도 background 작업 유지 |
-| 저장 | SQLite WAL + 단일 writer actor, 큰 출력/스냅샷은 파일. wrapper는 M0 spike 후 고정 |
+| 저장 | SQLite WAL + 단일 writer actor, 출력·변경 전 내용·context는 SHA-256 blob. retention/복원은 후속 |
 | 모델 | API 어댑터·인증·capability 분리. 외부 vLLM/Ollama도 동일한 연결 모델 |
 | 추론·Ultra | provider 추론 제어와 다중 agent 실행을 분리. 로컬 모드 Off/On/Ultra는 검증된 두 축의 preset |
 | 검색·MCP | 모델과 독립적인 integration. 사용자가 맡긴 scope 안에서 MCP 제작·검증·활성화까지 자동 진행 |

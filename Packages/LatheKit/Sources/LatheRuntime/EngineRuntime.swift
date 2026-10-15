@@ -1,18 +1,32 @@
 import Foundation
 import LatheDomain
 import LathePersistence
+import LatheProviders
 
 public actor EngineRuntime {
-    private let store: SQLiteStore
+    let store: SQLiteStore
     private let chunkDelay: Duration
-    private var workers: [UUID: Task<Void, Never>] = [:]
+    var workers: [UUID: Task<Void, Never>] = [:]
+    let blobs: BlobStore
+    let credentials: any CredentialStore
+    let modelClient: ModelClient
+    let dataDirectory: URL
+    let runnerURL: URL
+    var writeOwners: [String: UUID] = [:]
+    var shuttingDown = false
 
-    public init(databaseURL: URL, chunkDelay: Duration = .milliseconds(120)) throws {
+    public init(databaseURL: URL, chunkDelay: Duration = .milliseconds(120), runnerURL: URL? = nil,
+                credentials: any CredentialStore = KeychainCredentialStore(), modelClient: ModelClient = ModelClient()) throws {
         guard chunkDelay >= .zero else { throw LatheError.invalidRequest("스트림 지연은 0 이상이어야 합니다.") }
         let store = try SQLiteStore(databaseURL: databaseURL)
         try store.recoverInterruptedRuns()
         self.store = store
         self.chunkDelay = chunkDelay
+        self.dataDirectory = databaseURL.deletingLastPathComponent().standardizedFileURL.resolvingSymlinksInPath()
+        self.blobs = try BlobStore(root: databaseURL.deletingLastPathComponent().appendingPathComponent("blobs"))
+        self.credentials = credentials; self.modelClient = modelClient
+        self.runnerURL = runnerURL ?? (Bundle.main.executableURL ?? URL(fileURLWithPath: CommandLine.arguments[0]))
+            .deletingLastPathComponent().appendingPathComponent("lathe-runner")
     }
 
     public func listSessions(before: UUID? = nil, limit: Int = 50) async throws -> SessionPage {
@@ -39,23 +53,50 @@ public actor EngineRuntime {
         return try store.createSession(title: title, workspacePath: url.path)
     }
 
-    public func submit(sessionID: UUID, prompt: String, requestID: UUID) async throws -> RunSnapshot {
+    public func submit(sessionID: UUID, prompt: String, requestID: UUID, configuration: RunConfiguration? = nil) async throws -> RunSnapshot {
+        guard !shuttingDown else { throw LatheError.conflict("엔진이 종료 중입니다.") }
         guard !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, prompt.utf8.count <= 32 * 1_024 else {
             throw LatheError.invalidRequest("요청은 비어 있지 않아야 하며 UTF-8 32KiB 이하여야 합니다.")
         }
-        let result = try store.submit(sessionID: sessionID, prompt: prompt, requestID: requestID)
+        try configuration?.validate()
+        let result = try store.submit(sessionID: sessionID, prompt: prompt, requestID: requestID, configuration: configuration)
         if result.created {
             let runID = result.run.id
-            let chunks = Self.mockChunks(for: prompt)
-            workers[runID] = Task { [weak self] in await self?.stream(runID: runID, chunks: chunks) }
+            if let configuration, let profile = configuration.profile {
+                workers[runID] = Task { [weak self] in await self?.agentLoop(run: result.run, profile: profile, configuration: configuration) }
+            } else {
+                let chunks = Self.mockChunks(for: prompt)
+                workers[runID] = Task { [weak self] in await self?.stream(runID: runID, chunks: chunks) }
+            }
         }
         return result.run
     }
 
     public func cancel(runID: UUID) async throws -> RunSnapshot {
-        let run = try store.finish(runID: runID, state: .cancelled)
-        workers.removeValue(forKey: runID)?.cancel()
-        return run
+        let worker = workers[runID]
+        // Stopping effects must not depend on being able to write a receipt.
+        // The actor does not yield until the state update has been attempted.
+        worker?.cancel()
+        do {
+            let run = try store.finish(runID: runID, state: .cancelled)
+            try store.invalidatePendingInvocations(runID: runID)
+            await worker?.value
+            return run
+        } catch {
+            await worker?.value
+            throw error
+        }
+    }
+
+    public func shutdown() async {
+        shuttingDown = true
+        let pending = workers
+        for (id, task) in pending {
+            _ = try? store.finish(runID: id, state: .interrupted, reason: "엔진이 종료되었습니다.")
+            try? store.invalidatePendingInvocations(runID: id)
+            task.cancel()
+        }
+        for task in pending.values { await task.value }
     }
 
     public func events(after cursor: Int64, sessionID: UUID?, runID: UUID? = nil, limit: Int = 256) async throws -> EventPage {
@@ -73,7 +114,8 @@ public actor EngineRuntime {
             try Task.checkCancellation()
             try store.finish(runID: runID, state: .completed)
         } catch is CancellationError {
-            // cancel() commits the terminal state before cancelling this worker.
+            // cancel() attempts the terminal receipt before awaiting this worker;
+            // cleanup still runs when persistence fails and the caller gets that error.
         } catch {
             // If storage remains unavailable, startup recovery marks this run
             // interrupted. A failed write can never produce a completion event.

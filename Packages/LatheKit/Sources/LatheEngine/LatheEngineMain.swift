@@ -19,7 +19,7 @@ struct LatheEngineMain {
             let paths = try EnginePaths(root: root)
             let lease = try EngineLease(paths: paths)
             let runtime = try EngineRuntime(databaseURL: paths.database)
-            let service = EngineService(runtime: runtime, info: EngineInfo(processID: getpid(), engineID: UUID()))
+            let service = EngineService(runtime: runtime, info: EngineInfo(processID: getpid(), engineID: UUID(), mode: "coding-preview"))
             let server = try UnixSocketServer(path: paths.socketPath) { await service.handle($0) }
             signal(SIGINT, SIG_IGN)
             signal(SIGTERM, SIG_IGN)
@@ -34,6 +34,7 @@ struct LatheEngineMain {
                 withExtendedLifetime(lease) {}
             }
             try await server.run()
+            await runtime.shutdown()
         } catch {
             FileHandle.standardError.write(Data("lathe-engine: \(error.localizedDescription)\n".utf8))
             exit(1)
