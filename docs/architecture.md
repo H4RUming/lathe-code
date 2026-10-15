@@ -9,6 +9,8 @@
 - [프로바이더 계약](providers.md): 서비스별 API, 인증, 외부 모델 서버.
 - [추론과 Ultra](reasoning-and-ultra.md): native 옵션, Off/On/Ultra, 역할·공유 예산·서버 큐.
 - [도구와 MCP 제작](tools-and-mcp-authoring.md): 검색·도구 registry, MCP 설정·제작·검증·활성화.
+- [실행·디버깅](execution-and-debugging.md): 실행 profile·환경·테스트 증거·LLDB-DAP.
+- [기능 누락 점검](functional-gap-audit.md): 기준 revision 대비 보완 항목과 우선순위.
 - [구현 계획](roadmap.md): 단계별 기능/커밋/검증 게이트.
 
 첫 milestone은 전체 기능 동등성의 완료가 아니다. Skills·Hooks·MCP·서브에이전트·CLI·체크포인트·백그라운드 실행은 최종 제품의 필수 기능이다.
@@ -74,6 +76,9 @@ flowchart TD
 | `EndpointScheduler` | serving resource별 요청 lease·공정 큐·부하 제한, coordinator/child 요청 합산 |
 | `TaskSupervisor` | shell·subagent·workflow·monitor의 수명과 취소 |
 | `WorkspaceCoordinator` | canonical root, write lease, 변경 감지, checkpoint |
+| `ExecutionProfileService` | profile·환경 snapshot·bootstrap DAG·build/test receipt; 실행은 공통 broker/runner |
+| `DebugSessionActor` | DAP 상태·target identity·control owner·stop generation, adapter process 수명 |
+| `DocumentCoordinator` | 열린 문서·dirty buffer revision·복구 blob·agent patch와 editor 변경 조정 |
 | `PolicyEngine` | 유효 규칙, approval scope, policy revision |
 | `CredentialBroker` | Keychain, helper/OAuth token 갱신 및 합치기 |
 | `StoreActor` | 트랜잭션, event sequence, 조회 projection, migration |
@@ -110,8 +115,10 @@ App/CLI는 Protocol client에 의존한다. provider별 분기를 UI나 agent lo
 
 | 엔터티 | 필드와 불변식 |
 | --- | --- |
-| Workspace | id, environmentID, canonical root, repository/worktree ID, trust revision |
-| Session | id, workspaceID, title, parent session/revision, instruction profile |
+| Workspace | id, environmentID, root catalog/default primary root, 모든 세션에 적용되는 policy revision |
+| WorkspaceRoot | id, canonical path, repository/worktree ID, read/write scope, instruction/trust revision |
+| Session | id, workspaceID, workspaceBindingID, title, parent session/revision, instruction profile |
+| SessionWorkspaceBinding | session별 active root IDs·primary root·cwd·access snapshot/revision. fork는 독립 복사하며 전역 deny를 초과하지 못함 |
 | Turn | 사용자 입력 경계, checkpointID, typed attachments, 입력 출처 |
 | Run | turnID, attempt, model/permission snapshot, budget, state |
 | ReasoningPolicy | UI preset, provider native options, capability revision, 요청별 resolved control |
@@ -121,6 +128,9 @@ App/CLI는 Protocol client에 의존한다. provider별 분기를 UI나 agent lo
 | ToolInvocation | invocation ID, provider call mapping, tool ID, args hash, effects, state |
 | ApprovalGrant | request hash, scope, workspace/connection, policy revision, expiry |
 | Task | parent/root ID, kind, environment, state, 예산 예약 |
+| ExecutionAttempt | profile/environment/source revisions, actual argv/cwd, artifact/result receipts |
+| DebugSession | target identity, adapter/capability revision, launch/attach, owner, stoppedGeneration |
+| DocumentBuffer | client/document/root ID, base/disk/buffer revision, dirty snapshot, undo provenance |
 | Checkpoint | turn/revision, file manifests, baseline blobs, 변경 소유자 |
 | ProviderContinuation | connection/model/API identity, opaque blocks, replay constraints |
 | MemoryEntry | scope, source, text, 사용자에게 보이는 revision |
@@ -155,6 +165,9 @@ mid-stream steering 미지원 provider는 중단 후 새 step에서 지시를 �
 HTTP 재요청과 tool 재실행은 다르다. 완료된 tool 결과는 다시 전송할 수 있지만 도구 자체를 재실행하지 않는다.
 새 call ID로 같은 변경이 제안되면 파일 precondition·실행 상태를 확인한다. shell/MCP 외부 효과에 exactly-once를 주장하지 않는다.
 토큰 한도·취소·비정상 EOF에서 미완성 tool call을 실행하지 않는다.
+provider 응답 종료는 final/clientTools/serverContinuation/blocked/truncated/noUsableOutput으로 구분한다.
+serverContinuation은 공급자 원본 state를 유지한 다음 model step이며 root 예산·취소·변경 지시 경계가 적용된다.
+hosted tool을 로컬 도구로 재실행하지 않고 blocked/empty를 성공으로 기록하지 않는다. [provider 계약](providers.md)이 mapping을 소유한다.
 
 ## 7. ToolBroker 계약
 
@@ -177,6 +190,24 @@ MCP의 readOnly annotation은 참고 정보이며 권한의 증거가 아니다.
 다른 hook을 유발하는 체인도 깊이·횟수 한도를 적용한다. hook을 기다리면서 부모의 workspace write lease를 잡아두지 않는다.
 읽기는 bounded parallel, 파일 쓰기·shell·Git mutation은 같은 workspace의 write lane에서 직렬화한다.
 장기 서버도 파일을 바꿀 수 있으므로 별도 concurrent task 전환 시 격리/충돌 정책을 적용한다. 병렬 코딩 writer는 worktree를 사용한다.
+
+### 실행 profile·테스트·디버거
+
+ExecutionProfileService와 bootstrap은 composite orchestration으로 parent intent를 기록한다. 전체 흐름의 write lease를
+잡고 child build/setup tool을 기다리지 않으며 실제 leaf마다 broker의 lease·policy·journal을 적용한다.
+toolchain/PATH/SDK·profile·source snapshot을 ExecutionAttempt에 묶고 raw log와 구조화 BuildResult/TestRun을 보존한다.
+0 tests·취소·부분 결과·이전 artifact는 현재 revision의 성공과 구분한다. worktree 준비 실패는 coding task ready가 아니다.
+
+DebugSessionActor는 LatheExecution의 adapter port와 runner를 사용한다. DAP는 별도 protocol이며 Runtime에는 typed
+launch/attach/breakpoint/step/inspect/evaluate 결과만 전달한다. adapter의 runInTerminal 역호출도 broker로 보낸다.
+launch/attach handshake도 composite orchestration이다. 부모 workspace write lease 없이 DAP event pump를 유지하고
+initialized/configurationDone 및 허가된 runInTerminal leaf를 처리한다. launch 응답을 기다리느라 adapter가 요구하는
+후속 요청·역호출을 막지 않는다. leaf process 시작의 lease는 그 receipt 후 해제하며 handshake 전체로 연장하지 않는다.
+control owner는 하나이며 stoppedGeneration 변경 후 낡은 frame/variable reference를 거절한다.
+debugger 전체 수명 동안 workspace write lease를 잡지 않는다. 실행 중 debuggee의 파일 효과는 process sandbox/별도
+scratch·checkout 정책으로 관리하고, adapter request 종료만으로 debuggee의 쓰기가 끝났다고 보지 않는다.
+owned launch와 external attach는 종료 책임을 분리한다. crash 뒤 PID만으로 재attach하거나 evaluate를 replay하지 않는다.
+상세 capability·Plan 경계·종료 정책은 [실행·디버깅 계약](execution-and-debugging.md)을 따른다.
 
 ## 8. 권한·신뢰·격리
 
@@ -231,6 +262,24 @@ provider key는 shell environment에 자동 상속하지 않으며 provider 네�
 - 사용자/다른 세션 변경을 구분한다. subagent file tool 변경은 소유자와 root checkpoint를 연결한다.
 - Git commit/push/PR은 정상 기능으로 제공하며 요청/명시적 자동화 정책으로 수행한다. checkpoint와는 별개다.
 - branch/worktree 변경 시 파일 cache/LSP/context revision을 무효화한다. dirty worktree를 자동 제거하지 않는다.
+
+### 여러 작업 root와 editor buffer
+
+한 Workspace의 roots는 같은 ExecutionEnvironment에 속하며 각 root의 Git identity·cwd·지침·접근 권한을 보존한다.
+canonical checkout별 coordinator를 공유하므로 두 root alias가 같은 쓰기 lock을 우회하지 못한다.
+primary root 변경과 명령 cwd 변경은 별개다. 추가 root 파일 접근은 해당 root의 hook/MCP/실행 설정 활성화가 아니다.
+세션의 root 추가/제거·접근 범위는 SessionWorkspaceBinding을 갱신한다. fork는 독립 binding을 만들므로
+분기에서 root를 제거해도 원본의 membership/grant를 변경하지 않는다. 사용자가 workspace 전역 정책을 철회한 경우는
+별도 global revision으로 모든 binding에 재적용하며 과거 snapshot으로 현재 deny를 우회하지 못한다.
+root 제거/권한 축소 때 관련 queued 작업을 재검사하고 진행 중 소유 프로세스는 stop/reconcile한 뒤 membership을 확정한다.
+checkpoint/diff/commit은 root별로 기록하며 다중 저장소 변경의 원자적 commit/rollback을 주장하지 않는다.
+여러 root가 필요한 leaf는 정해진 canonical ID 순으로 lease를 획득하고 실패·취소 시 모두 해제한다.
+
+DocumentCoordinator는 열린 dirty buffer를 engine에 등록한다. agent의 disk patch 전 buffer/base/disk revision을 함께
+검사하고 dirty 문서를 무시한 overwrite를 막는다. 사용자는 buffer에 선택 적용·저장 후 적용·충돌 해결을 선택할 수 있다.
+3-way의 base와 각 hunk 입력 revision을 고정하고 stale 선택은 다시 계산한다. agent patch와 사용자 undo의 출처를 유지한다.
+미저장 buffer는 별도 복구 blob에 저장하며 crash 복구가 최신 disk를 덮어쓰지 않는다. buffer context를 사용한 요청은
+읽은 buffer revision을 명시하고 실제 build/test는 저장한 disk revision을 검증한다.
 
 ## 10. 컨텍스트와 메모리
 
@@ -323,6 +372,7 @@ goal은 완료 근거·중단 조건·예산·취소를 기록한다. 모델의 
 | Plan | 계획 revision, 수정 요청, 승인 후 실행, 결과 연결 |
 | Changes | diff, hunk 의견, checkpoint/rewind, 충돌 |
 | Tasks/terminal | shell/PTY, stdout/stderr, background/stop, child tree |
+| Run/Debug | 실행 profile·환경 준비, test tree/원본 결과, breakpoint·stack·variables·debug console |
 | Context | 적용 지침/스킬/메모리, 점유량, compaction, 사용량 |
 | Providers | 여러 URL/auth/prefix, 모델 capability, 진단/전환 |
 | Extensions | source/version/trust/호환 보고서, MCP/LSP 상태 |
@@ -332,10 +382,13 @@ slash/menu/키보드는 같은 command registry를 사용하고 CLI도 같은 co
 send/줄바꿈/중단/명령 팔레트/검색을 구분하며 VoiceOver·키보드·한글 IME를 검증한다.
 transcript는 가상화하고 사용자가 스크롤하면 tail-follow를 멈춘다. 렌더링이 model loop를 막지 않는다.
 preview, browser automation, computer use를 별도 capability로 표시한다.
+음성 입력은 별도 TranscriptionBackend와 draft 상태를 사용한다. 전사 provider·처리 위치·마이크 권한을 보여주고
+취소/오류 시 기존 draft를 보존한다. 전사 완료는 전송/승인 이벤트가 아니며 사용자 편집 후 명시적 전송을 따른다.
 
 ## 14. 원격 실행과 서비스
 
-ExecutionEnvironment는 read/search/patch/run/PTY/Git/checkpoint/watch/port-forward capability를 광고한다.
+ExecutionEnvironment는 read/search/patch/run/PTY/Git/checkpoint/watch/port-forward/debug capability를 광고한다.
+debug capability는 local LLDB-DAP 검증부터 시작하며 SSH executor 연결만으로 remote debug 지원을 선언하지 않는다.
 M1은 local, M7은 SSH backend다. 원격 path/environment ID를 보존하고 연결 복구·로그 cursor·lease를 처리한다.
 모델 credential을 remote shell에 자동 전달하지 않는다.
 IntegrationService는 검색/browser/GitHub/remote relay/cloud runner/artifact hosting 등의 별도 연결이다.
@@ -349,6 +402,7 @@ IntegrationService는 검색/browser/GitHub/remote relay/cloud runner/artifact h
 | --- | --- |
 | Engine/IPC | GUI+CLI 동시 시작에도 engine 하나, detach/replay, stale socket/migration lock, 버전 불일치 처리 |
 | Process/PTY | 출력 폭주, stdin/resize, timeout, 자식 종료, 앱 재접속 |
+| Execution/Debug | profile 재현·fresh worktree setup·zero/partial test 결과, 실제 LLDB-DAP launch/attach/step/변수·종료 |
 | Sandbox | 파일/네트워크/프로세스 우회 fixture 및 실제 툴체인. 미지원 시 대안 결정 |
 | Persistence | edit 전후 crash injection, 복구/migration, 외부 명령 unknown 처리 |
 | Provider | OpenAI+원격 호환 서버에서 stream/tool 왕복/취소/continuation |

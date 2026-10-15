@@ -14,6 +14,8 @@ Vertex AI, Anthropic Claude, vLLM, Ollama 및 기타 모델 서버를 지원할 
 - [프로바이더와 원격 모델 연결](docs/providers.md)
 - [추론 단계와 Ultra 다중 에이전트](docs/reasoning-and-ultra.md)
 - [검색 도구와 MCP 자동 설정·제작](docs/tools-and-mcp-authoring.md)
+- [실행 환경·테스트·디버거 계약](docs/execution-and-debugging.md)
+- [기능 누락 점검과 보완 우선순위](docs/functional-gap-audit.md)
 - [구현 순서와 변경별 커밋 계획](docs/roadmap.md)
 
 로컬·개인 서버 모델에는 `Off / On / Ultra`를 제공할 계획입니다. Ultra는 추론을 켠

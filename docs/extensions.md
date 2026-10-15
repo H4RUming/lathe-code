@@ -53,6 +53,8 @@ Lathe가 쓰는 설정과 Claude Code가 관리하는 설정을 분리한다. `.
 | `CLAUDE.md`, `.claude/CLAUDE.md`, `CLAUDE.local.md`, `.claude/rules/**` | 프로젝트 지침으로 읽기; 출처·범위·import 기록 | E 문법 / N 신뢰 경계 |
 | `AGENTS.md` | Lathe 기본 프로젝트 지침; CLAUDE 계열과 중복되는 파일은 canonical path/hash로 식별 | N |
 | `.claude/settings.json`, `.claude/settings.local.json` | 지원 필드를 변환한 읽기 전용 layer | E 필드별 / N 전체 설정 |
+| `.claude/launch.json` | JSONC dev-server 설정을 ExecutionProfile로 변환; 미지원 필드 진단 | E 필드별 / N 실행·preview |
+| `.worktreeinclude` | gitignored 파일의 선택 copy manifest로 해석; source/destination grant 검증 | E 문법 / N 초기화 정책 |
 | `.claude/skills/**/SKILL.md`, `.claude/commands/**/*.md` | skill·명령 레지스트리로 읽기 | E 문법 / N 실행 정책 |
 | `.claude/agents/**/*.md` | subagent 정의로 읽기 | E 문법 / N 모델·권한 |
 | `.mcp.json` | 프로젝트 MCP 서버 정의로 읽기 | E 형식 / N 활성화 |
@@ -66,6 +68,7 @@ Lathe 소유 파일:
 
 - 전역 `~/.lathe/settings.json`, `~/.lathe/rules/`, `~/.lathe/skills/`, `~/.lathe/agents/`.
 - 공유 프로젝트 `.lathe/settings.json`, `.lathe/rules/`, `.lathe/skills/`, `.lathe/agents/`, `.lathe/mcp.json`.
+- 실행 profile·worktree bootstrap은 `.lathe/launch.json`; `.claude/launch.json`과 VS Code DAP 설정을 혼동하지 않는다.
 - 개인 프로젝트 `.lathe/settings.local.json`; 프로젝트별 MCP override도 이 파일에 둔다.
 - 공유 의존성 고정 `.lathe/plugins.lock.json`: source URL, commit/digest, package version, schema profile. 비밀·승인 토큰은 넣지 않는다.
 - 실행 기록·auto memory·캐시·설치 승인·자격 증명 참조는 Application Support의 Lathe 전용 저장소.
@@ -355,6 +358,14 @@ marketplace는 package 자체가 아니라 source를 찾는 catalog다.
 - 제거는 등록과 실행을 중지하고 cache/data 삭제를 구분한다. 사용자 작업 파일이나 worktree를
   plugin 소유 파일로 오인해 삭제하지 않는다.
 
+plugin 간 `dependencies`는 SDK/package dependency와 별도 graph다(`LAT-EXT-001`). 이름뿐 아니라 source와
+version range를 해석하고 전이 의존성·constraint 교집합·cycle·누락·namespace 충돌을 검사한다.
+선택한 호환 profile의 graph를 lockfile에 고정하며 단순 parser 성공을 설치 가능으로 표시하지 않는다.
+설치/업데이트는 전체 영향 graph를 staging에서 검증한 뒤 registry revision을 전환한다. 실패하면 기존 정상 graph를 유지한다.
+disable/remove 전 dependents를 표시하고 영향을 받는 component를 함께 비활성화하거나 변경을 거절한다.
+공유 의존성은 다른 활성 plugin이 참조하면 제거하지 않는다. 전이 의존성의 실행·network 효과도 기존 trust/grant를 검사한다.
+[공식 plugin dependencies](https://code.claude.com/docs/en/plugins/dependencies)
+
 기존 플러그인도 사용자 권한으로 코드를 실행할 수 있다. Lathe의 tool 승인 UI가 외부 hook,
 MCP/LSP 프로세스의 모든 filesystem/network 동작을 격리하는 것은 아니다.
 활성화 화면은 실행 command·접속 origin·설정 전달 범위를 보여 준다. 신뢰 기록은 실행 파일과
@@ -433,12 +444,12 @@ OAuth와 remote MCP는 M4의 integration 지원이며, remote workspace 실행�
 
 | ID | 결과물 | 수용 기준 / 커밋 단위 예시 |
 | --- | --- | --- |
-| X1 | config·지침·memory resolver | scope 충돌·외부 import·잘못된 YAML·native override 검사; `feat(config): resolve instructions and imported settings` |
+| X1 | config·지침·memory resolver | scope 충돌·외부 import·launch JSONC/worktree include·잘못된 YAML·native override 검사; `feat(config): resolve instructions and imported settings` |
 | X2 | skills·legacy commands | 자동/수동 호출, 인자·reference·동적 전처리, source 표시; `feat(skills): add invocation and command compatibility` |
 | X3 | hook engine·기본 lifecycle | command/http, payload, 결정, 취소, timeout, recursion 검증; `feat(hooks): dispatch lifecycle events with decisions` |
-| X4 | MCP 완성 경로 | stdio/HTTP/legacy SSE, discovery, auth, resource/prompt, 취소·복구; `feat(mcp): connect servers and expose tools` |
+| X4 | MCP 완성 경로 | stdio/HTTP/legacy SSE, discovery, auth, resource/prompt, typed image 결과, Lathe server 모드, 취소·복구; 기능별 커밋 |
 | X5 | subagents·team 연결 | isolated context, model map, skill preload, worktree, budget·resume·취소; `feat(agents): run scoped subagents` |
-| X6 | plugins·marketplaces·LSP | 실제 bundle 설치·disable·update·rollback과 진단/탐색; `feat(plugins): manage versioned extension packages` |
+| X6 | plugins·marketplaces·LSP | dependency graph 설치·disable·update·rollback과 진단/탐색; `feat(plugins): manage versioned extension packages` |
 | X7 | 확장 고급 호환성 | 나머지 lifecycle, prompt/agent/mcp_tool hooks, workflows·monitors·styles·mods bridge와 MCP client capability; 기능별 커밋 |
 | X8 | 전체 호환성 gate | 아래 fixture·통합 시나리오와 미지원 inventory 검토, 사용자에게 정확한 지원표 제공 |
 | X9 | MCP 자동 설정·제작 | 위임→scaffold/build→protocol/agent 왕복 시험→등록/활성화→진단/rollback; `feat(mcp): build and activate servers within delegated scope` |
@@ -467,6 +478,8 @@ source URL, 확인일, 검증한 CLI 버전 또는 `docs-only`, Lathe schema ver
   write lease와 worktree의 사용자 변경 보존.
 - plugin/LSP: source pin, archive escape, 변경된 manifest, rollback, 누락 executable,
   부정 protocol frame, stale diagnostic, namespace 충돌, 부분 설치 표시.
+- 보완 호환성: launch JSONC/미지원 실행 필드, worktree include·setup 실패, dependency graph 충돌/cycle,
+  MCP typed image 왕복·미지원 content 보존, Lathe server 모드의 무인 승인 오류·재귀 차단.
 
 E 승격은 문법 parse 테스트만으로 하지 않는다. fake provider와 fake process를 사용한 결정적
 contract test, 실제 MCP/LSP server를 사용한 통합 테스트, 선택한 Claude Code 버전과의

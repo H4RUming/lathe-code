@@ -64,6 +64,23 @@ OpenAI·Google·Claude의 고유 effort/level/budget/mode는 실제 지원 값 �
 모델 목록 조회 성공은 도구 호출 지원의 증거가 아니다. 연결 진단은 일반 응답, 스트리밍, 무해한 도구 호출과 결과 반환까지 단계별로 확인한다.
 검증 결과는 URL·모델·설정 revision에 연결한다. 모든 모델의 코딩 능력이나 향후 서버 설정까지 보장하지 않는다.
 
+### 실제 context와 프로필 수명
+
+`ContextLimits`는 modelMaximum, serverConfigured, requestEffective, outputReservation과 각 값의 근거를 분리한다.
+알려진 입력/출력 합산 규칙과 가장 작은 적용 상한으로 ContextCompiler 예산을 계산한다. 미확인 서버 한도를
+모델의 광고 최대 길이와 같다고 확정하지 않는다. 추정 token 수에는 여유를 두고 overflow 오류도 연결 진단에 반영한다.
+Ollama `options.num_ctx` 같은 요청 설정은 adapter가 해당 API/model에서 검증한 경우에만 전송한다.
+원격 서버의 전역 설정·model unload를 자동 변경하지 않는다. 앱 32k/서버 4k 사례에서 사전 축약 또는 사용자에게
+유효 설정 변경을 안내하며 서버가 조용히 잘랐을 가능성이 있으면 전체 context 전달 완료로 표시하지 않는다.
+[Ollama context 설정](https://docs.ollama.com/faq#how-can-i-specify-the-context-window-size)
+
+profile은 stable ID와 revision으로 참조한다. endpoint/auth/API 설정 변경 시 관련 검증을 stale 처리하며,
+응답 modelVersion·digest·template 등 관측 가능한 metadata가 바뀌면 새 run 전에 영향 capability를 재검증한다.
+관측 metadata가 없는 alias 교체는 자동 탐지 보장 대상이 아니다. last checked·사용자 확인/수동 재진단을 제공한다.
+변경은 실행 중 snapshot을 덮어쓰지 않고 새 요청에 적용한다. 이전 계약이 깨진 실행은 configuration failure로 멈춘다.
+삭제 전 session·Ultra role·schedule·sampling 참조를 조회하고 이관/비활성화를 선택한다. history에는 tombstone을 남기며
+살아 있는 예약이 이름이 비슷한 다른 모델로 조용히 이동하지 않는다. credential 삭제는 의존 연결을 인증 필요 상태로 바꾼다.
+
 ### 외부 모델 서버
 
 동일한 연결 타입으로 아래 형태를 처리한다. 주소는 예시다.
@@ -98,7 +115,7 @@ protocol ModelProvider: Sendable {
 }
 ```
 
-`ModelEvent`는 text delta, tool-call assembly, usage, 정상 완료를 표현한다. 네트워크·프로토콜 실패는 typed error로 반환한다.
+`ModelEvent`는 text delta, tool-call assembly, usage, provider 응답 종료를 표현한다. 네트워크·프로토콜 실패는 typed error로 반환한다.
 정상 완료에는 finish reason과 재전송에 필요한 provider continuation state가 포함된다.
 스트림 종료와 정상 응답 완료를 구분하며, task 취소는 HTTP 요청 취소까지 전달한다.
 
@@ -109,6 +126,28 @@ protocol ModelProvider: Sendable {
 - UI용 텍스트와 다음 요청에 필요한 provider 원본 블록을 분리 저장한다.
 - OpenAI reasoning items, Gemini thought signatures, Anthropic thinking/signature는 provider별 규칙에 맞게 원형 보존한다.
 - provider 고유 상태는 다른 provider에 전달하지 않는다. UI에 노출할 요약과 opaque continuation 데이터를 구분한다.
+
+응답 종료는 `ModelStepOutcome`으로 해석하고 HTTP 성공·stream EOF·작업 목표 완료와 구분한다.
+
+| outcome | 런타임 동작 |
+| --- | --- |
+| final | usable content를 저장하고 작업 완료/다음 단계 조건을 평가; 모델의 완료 주장만으로 검증 통과 처리하지 않음 |
+| clientTools | 완성된 client tool call만 공통 broker에 전달 |
+| serverContinuation | provider가 요구하는 원본 blocks/tools/continuation을 보존해 제한된 후속 모델 요청; hosted tool을 local shell/MCP로 재실행하지 않음 |
+| blocked | refusal/filter와 공개된 이유를 기록하고 중지/사용자 입력; 자동 반복으로 같은 요청을 우회하지 않음 |
+| truncated | 출력/context 한도와 partial content를 기록; 잘린 도구 인수는 실행하지 않음 |
+| noUsableOutput | candidate/content 부재·잘못된 종료를 구조화된 오류로 반환; 빈 성공으로 표시하지 않음 |
+
+provider 조합별 여러 block과 종료 이유의 일치 여부를 adapter가 판정한다. 불일치하면 추정으로 tool을 실행하지 않는다.
+serverContinuation도 request slot·root 예산·반복 제한을 소비하고 사용자의 취소를 검사한다. continuation에 필요한 도구 목록과
+blocks를 조용히 바꾸지 않는다. steering/정책 철회로 같은 상태를 이어갈 수 없으면 경계에서 중단하고 새 run으로 계획한다.
+Claude의 pause_turn과 Gemini의 promptFeedback/candidate 부재는 이 fixture의 필수 사례다.
+[Claude stop reasons](https://platform.claude.com/docs/en/build-with-claude/handling-stop-reasons),
+[Gemini 응답 계약](https://ai.google.dev/api/generate-content#GenerateContentResponse)
+
+도구 결과도 typed content를 유지한다. text/structured/image/audio/resource reference를 decoder에서 보존하고,
+각 adapter가 지원하는 tool-result 또는 attachment 형식으로 call ID와 출처를 유지해 전달한다. vision 입력 지원과
+tool-result image 지원은 별도 진단한다. 미지원 유형은 artifact로 보존·명시하며 base64 문자열로 자동 대체하지 않는다.
 
 provider/model/추론 옵션 변경은 안전한 실행 경계에서 새 snapshot으로 적용한다. 기본은 현재 turn 종료이며,
 진행 중 변경은 요청 취소·진행한 효과 정리 후 새 run으로 전환한다. Ultra의 진행 중 child에는 기존 snapshot이 유지된다.

@@ -38,8 +38,17 @@ Claude Code의 도구 이름은 권한 규칙·subagent 목록·hook matcher에�
 호출 순서: `JSON decode → schema 검증 → scope/effect 계산 → hard deny → pre-hook → 변경 인자 재검증 → policy → journal → 실행 → 결과 검증`.
 write lease·post-hook·실행 receipt의 정확한 순서는 아키텍처의 공통 ToolBroker 계약을 따른다.
 실패 결과는 `invalid_arguments`, `permission_required`, `configuration_required`, `unavailable`, `timeout`, `cancelled`, `execution_failed`로 구분한다.
-`ToolResult`는 text/structured content, artifact·citation 참조, truncation, 실행 receipt, 재시도 안전성을 보존한다.
+`ToolResult`는 text/structured/image/audio/resource link/embedded resource, artifact·citation 참조,
+truncation, 실행 receipt, 재시도 안전성을 typed content로 보존한다.
 원격 오류·인증 실패·tool의 `isError`를 성공적인 검색 내용이나 빈 결과로 바꾸지 않는다.
+
+이미지 결과는 MIME/크기/유효성 검사를 거쳐 blob으로 보존하고 provider별 tool-result/attachment 경로에 매핑한다.
+UI 미리보기와 모델이 실제 받은 이미지·크기 변환을 구분하며 call ID·source·원본 digest를 유지한다.
+vision 미지원 모델은 이미지 내용을 읽었다고 보고하지 않는다. audio 등 미지원 유형도 삭제하지 않고 artifact와 이유를 남긴다.
+resource link의 목록 발견과 원문 읽기는 별개며 follow-up fetch/read도 기존 scope·credential·budget을 통과한다.
+`LAT-MCP-009`는 screenshot 결과의 실제 vision 왕복과 후속 재사용으로 검증한다.
+[공식 MCP 결과 형식](https://modelcontextprotocol.io/specification/2025-11-25/server/tools#tool-result),
+[Claude Code 이미지 도구 결과](https://code.claude.com/docs/en/mcp#images-in-tool-results)
 
 ## 2. 검색은 모델과 독립적인 기능
 
@@ -181,7 +190,25 @@ schema·권한이 확대되면 해당 차이를 policy가 재평가하며, 승�
 build/test/health 실패 시 기존 설치를 유지한다. rollback은 이전 artifact·config·schema snapshot을 복구한다.
 rollback은 이미 발생한 외부 부수효과를 되돌린다는 의미가 아니며, write 호출 재시도는 idempotency 계약이 있을 때만 허용한다.
 
-## 6. 버전과 완료 게이트
+## 6. Lathe 자체의 MCP server 모드
+
+MCP client와 새 서버 제작 외에 `lathe mcp serve` 상당의 stdio server를 제공한다(`LAT-MCP-010`).
+외부 client가 선택된 파일·검색·편집·명령 도구를 사용할 때 같은 engine·ToolBroker·journal을 이용한다.
+기본은 로컬 stdio이며 HTTP 공개 hosting은 별도 기능이다. 외부 client 요청은 인간 승인으로 취급하지 않는다.
+launch profile에 workspace roots·tool subset·grant·budget·연결 수명을 고정하고 이 범위 안에서만 호출을 받는다.
+engine은 승인된 launch profile을 검증해 ingress instance ID와 한 번만 결합할 수 있는 불투명한 bridge handle을
+발급한다. handle은 로컬 IPC 연결에 묶으며 MCP payload/env나 모델 context로 내보내지 않는다.
+MCP clientInfo·요청에 적힌 client 이름/grant ID는 표시용 외부 입력이며 인증 근거가 아니다.
+재연결은 새 ingress를 발급하고 현재 launch profile/grant를 재검사한다. 다른 bridge의 grant를 가져올 수 없다.
+호출 receipt는 ingress instance와 MCP request ID를 함께 기록한다. 동일 clientInfo를 보낸 두 client도 각자 범위만 사용한다.
+GUI/승인 client가 없을 때 필요한 승인은 구조화된 tool error로 반환하고 무한 대기나 bypass로 바꾸지 않는다.
+stdout은 MCP protocol 전용, 진단은 stderr다. 연결 종료 시 소유 작업의 취소/유지 정책을 명시하고 receipt를 조회할 수 있게 한다.
+자기 server를 다시 client registry에 붙여 재귀 호출하는 경로는 instance identity·invocation stack·depth 제한으로 차단한다.
+서버 수명은 engine 소유로 두어 GUI가 닫혀도 stdio client 연결 동안 동작할 수 있다.
+Claude Code도 MCP server 모드를 제공한다. Lathe가 공통 broker 권한을 유지하는 차이는 N으로 기록한다.
+[공식 MCP server 모드](https://code.claude.com/docs/en/mcp#use-claude-code-as-an-mcp-server)
+
+## 7. 버전과 완료 게이트
 
 확인 시점 공식 MCP 가이드는 2026-07-28 revision이고, Swift SDK README는 2025-11-25 구현을 명시한다.
 따라서 SDK를 채택했다는 이유로 최신 protocol 전체 지원을 선언하지 않는다. 지원 revision·transport·capability matrix를 고정한다.
@@ -195,9 +222,11 @@ rollback은 이미 발생한 외부 부수효과를 되돌린다는 의미가 �
 | T3 MCP 사용·자동 구성 | LAT-MCP-001~004/007, E2E-20: stdio/HTTP 연결→scope/credential→목록→실제 호출→reload/diagnose/rollback |
 | T4 MCP 제작·활성화 | LAT-MCP-005~007, E2E-21: 자연어 요청→source/lock→mock 검증→package→등록→실제 agent 왕복 |
 | T5 자율성·권한 회귀 | LAT-MCP-008, E2E-20/21: 위임 범위 내 반복 승인 없음, 권한 확대만 질문, 주입된 config/설명으로 self-approve 불가 |
+| T6 비텍스트 결과·server 모드 | LAT-MCP-009/010, E2E-27: screenshot→vision→재사용, 미지원 artifact 보존, 외부 client→공통 broker→무인 승인 오류·재귀 차단 |
 
 T1과 T2의 독립 웹 검색·WebFetch 기본 기능은 M1 완료 게이트에 포함한다. T2의 시나리오는 E2E-19와 연결한다.
 T3·T4·T5는 X9를 포함한 M4 확장 완료 게이트이며 E2E-20 자동 설정과 E2E-21 자체 제작을 모두 통과해야 한다.
+T6는 M3 provider content 계약 위에 M4에서 완성한다.
 고급 browser 조작·UI와 원격 서비스는 M6/M7 범위로 유지하되 기본 검색·본문 조회의 선행 조건으로 만들지 않는다.
 최종 시나리오는 로컬 모델로 자료를 검색하고, 필요한 mock MCP 서버를 제작·활성화해 도구를 호출한 뒤 검증된 출처와 결과를 보고하는 것이다.
 build 실패·취소·재시작·schema 변경·없는 credential에서도 성공을 꾸미지 않고 다음 가능한 작업과 미완료 원인을 정확히 남겨야 한다.

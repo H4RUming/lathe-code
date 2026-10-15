@@ -63,6 +63,21 @@ L은 특정 회사 모델에만 붙는 기능으로 구현하지 않는다. P/I�
 | **LAT-TOOL-009 / L** 프로세스 수명 | 프로세스 그룹과 task ID를 연결하고 취소·timeout·앱 종료 정책을 정의한다. 종료 시 정상 종료 요청 뒤 강제 종료를 단계적으로 적용한다. | 자식·손자 프로세스가 남는 사례를 시험한다. 재시작 후 PID만으로 무관한 프로세스를 종료하지 않는다. |
 | **LAT-TOOL-010 / L** 테스트·개발 서버 | 테스트 결과, build 진단, server URL/port와 준비 상태를 실행 task에 연결한다. 서버 실행과 페이지 열기를 분리한다. | server가 계속 실행되는 동안 대화와 다른 작업을 진행할 수 있다. 포트 충돌·준비 실패·종료가 task 상태에 반영된다. |
 
+### 실행 환경·테스트·디버거
+
+shell에서 명령을 실행하는 기능과 재사용할 실행 설정·구조화된 테스트 결과·디버거 제어를 구분한다.
+[실행·디버깅 계약](execution-and-debugging.md)이 세부 동작을 정한다. LLDB/DAP 통합은 Lathe의 네이티브 강화 목표이며
+Claude Code 자체에 동일한 디버거 UI가 있다고 주장하지 않는다.
+
+| ID / 분류 | Lathe 요구사항 | 수용 기준 |
+| --- | --- | --- |
+| **LAT-EXEC-001 / L** 실행 profile | build/run/test/debug별 executable/args/cwd/env 참조·target/scheme/configuration/destination·준비 조건·출력 위치를 revision 있는 profile로 저장한다. `.claude/launch.json`의 지원 필드를 읽고 `.lathe`에 native override를 쓴다. | 같은 profile을 GUI/CLI/agent가 사용해 같은 실행을 재현한다. server ready와 process alive를 구분하고 미지원 import 필드를 진단한다. |
+| **LAT-EXEC-002 / L** 환경 준비 | PATH·toolchain·SDK/runtime·package manager·lockfile을 진단하고 허용된 setup profile로 dependency/worktree 환경을 준비한다. `.worktreeinclude`의 선택 파일 전달도 source/target별로 검증한다. | fresh worktree에서 필요한 dependency/env가 준비되어 테스트가 실행된다. 실패·취소·재실행 상태를 구분하고 프로젝트를 열거나 파일을 발견했다는 이유만으로 설치 script를 실행하지 않는다. |
+| **LAT-EXEC-003 / L** 검증 결과 모델 | test/build 결과를 case ID·실행 profile·소스 revision·환경·상태·duration·원본 artifact와 연결한다. 지원 adapter는 xcresult/JUnit 등 결과 형식을 읽는다. | 0 tests·skipped·cancelled·일부만 실행·기존 실패와 새 실패를 구분한다. exit 0 또는 이전 revision의 성공만으로 현재 수정 검증 완료를 표시하지 않는다. |
+| **LAT-DEBUG-001 / L+I** 디버거 제어 | LLDB-DAP를 시작 adapter로 launch/attach, breakpoint·exception stop, continue/pause/step, threads/stack을 typed tool과 공통 UI/CLI에서 제어한다. | 실행 가능한 debug fixture에서 breakpoint 적중→step→실제 frame 확인→수정·재실행을 완료한다. adapter/toolchain별 미지원 capability를 표시한다. |
+| **LAT-DEBUG-002 / L+I** 상태 검사 | stopped 상태의 scopes/variables/watch와 명시적 evaluate를 지원한다. session/stop generation으로 frame·변수 handle을 식별한다. | resume 뒤 낡은 handle을 거절하고 큰 변수는 페이지/한도로 처리한다. evaluate·조건식·formatter의 코드 실행 가능성을 effect로 취급해 Plan/권한을 우회하지 않는다. |
+| **LAT-DEBUG-003 / L+I** 디버거 수명 | 디버거·debuggee 소유자, launch/attach, detach/terminate, timeout/cancel/adapter crash를 기록한다. | 자신이 launch한 프로세스 종료와 외부 attach 대상 detach를 구분한다. 재시작 후 PID만으로 자동 attach/종료하지 않고 debug stop을 agent 완료로 오인하지 않는다. |
+
 ### Web·이미지·문서 입력
 
 참고 동작: Claude Code는 이미지 붙여넣기·파일 경로·drag and drop과 파일/디렉터리 참조를 지원한다. [공식 이미지·참조 흐름](https://code.claude.com/docs/en/common-workflows#work-with-images)
@@ -123,6 +138,7 @@ Plan 진입은 세션 소유 writer/process의 중지·대기와 mutation hook/�
 | **LAT-SESSION-005 / L** checkpoint | 직접 파일 도구의 변경 전 snapshot과 변경 후 hash를 turn·agent·workspace에 연결한다. 코드만, 대화만, 둘 다 되돌리기를 제공한다. | 코드 복원 전 영향 diff를 확인하고 현재 hash가 다르면 충돌을 알린다. 생성·삭제·rename도 복원 대상과 결과를 구분한다. |
 | **LAT-SESSION-006 / L** 복원 한계 | shell, 외부 API, DB, 배포, 사용자의 외부 편집을 완전 rollback 가능하다고 표시하지 않는다. 추적된 child-agent 변경은 owner를 유지한다. | checkpoint 화면이 복원 가능/불가능/충돌 경로를 나누고, 부분 복원 결과를 보존한다. Git history를 reset해서 복원을 흉내 내지 않는다. |
 | **LAT-SESSION-007 / L+I** 세션 간 메시지 | session ID·workspace·발신 actor·메시지 ID·시각·출처를 포함해 세션을 조회하고 메시지를 전달한다. 수신 정책은 허용·보류·거절이며 idle 알림 구독도 지원한다. 원격 전달은 별도 연결 권한을 요구한다. | 동일 이름의 세션을 ID로 구분한다. 재연결 시 메시지가 중복 실행되지 않고, 수신 문구를 인간 지시나 승인 기록으로 위장할 수 없다. 발신자의 거부된 작업을 다른 세션에서 우회하지 못한다. |
+| **LAT-WORKSPACE-001 / L** 여러 작업 root | 한 세션에 여러 폴더/저장소를 추가·제거하고 primary root와 현재 cwd를 구분한다. root마다 Git identity·지침·read/write 범위·trust를 관리한다. | frontend/backend 두 저장소의 Git·diff·cwd를 구분한다. fork의 root 제거는 원본에 적용되지 않으며 전역 권한 철회는 모든 세션에 적용한다. 파일 접근 추가가 hook/MCP 설정 활성화를 자동 허용하지 않는다. |
 
 참고 동작: Claude Code의 rewind는 코드·대화 복원을 구분하고, shell이 만든 파일 변경이나 외부 시스템 효과는 checkpoint로 되돌리지 못한다. Lathe는 child-agent가 공통 파일 도구로 수행한 변경까지 owner와 함께 journal에 남기는 것을 자체 설계 목표로 한다. [checkpoint 범위](https://code.claude.com/docs/en/checkpointing)
 
@@ -213,11 +229,16 @@ Lathe 개발 저장소에서 모든 변경을 커밋하는 팀의 개발 규칙�
 | **LAT-UI-003 / L** 알림·접근성 | 완료·실패·승인 필요·사용자 질문의 알림 설정, VoiceOver, Dynamic Type/가독성, 접근 가능한 diff·상태 표현을 제공한다. | 색상만으로 상태를 구분하지 않고, 사용자가 보고 있는 세션에 알림을 중복 발송하지 않는다. |
 | **LAT-UI-004 / L+I** 개발 미리보기 | 개발 서버 task와 앱 내 browser preview를 연결한다. URL·port·준비 상태·reload·console·screenshot·DOM 확인·사용자 조작·요소 지정 피드백을 제공한다. browser 자동 조작은 동일한 권한 경계를 사용한다. | UI 변경 후 실제 preview에서 click·입력·시각 확인을 수행한다. 서버 종료·원격 port tunnel·페이지 오류를 구분하고, preview cookie 저장소를 명시한다. |
 | **LAT-UI-005 / L** 파일 editor | 파일 tree와 탭, syntax highlight, 검색, 줄 이동, 저장, 외부 editor 열기, 수정 충돌 처리를 네이티브 화면으로 제공한다. | 사용자가 수정 중인 buffer를 agent가 덮어쓰지 않는다. 저장되지 않은 buffer와 disk revision 차이가 표시되고 어느 내용을 모델이 읽었는지 확인할 수 있다. |
+| **LAT-UI-006 / L** 편집 복구·적용 | base/buffer/disk revision과 agent patch를 비교하고 충돌 없는 hunk 적용·충돌 해결·undo·미저장 buffer 복구를 제공한다. | 외부 편집과 agent patch가 겹치면 선택 전 덮어쓰지 않는다. crash 후 복구 buffer를 disk 최신값에 대조하고, 적용한 patch만 새 revision에서 검증한다. |
+| **LAT-UI-007 / L+I** 음성 입력 | 녹음 시작/중지/취소, 전사 중/완료 상태, 기존 입력과 병합·편집·전송을 제공한다. 전사 backend·처리 위치·마이크 권한을 모델 추론 연결과 분리한다. | 마이크 거부·전사 실패·취소를 처리하고 전사만으로 메시지를 자동 전송하거나 도구 승인을 발급하지 않는다. VoiceOver와 별도 기능으로 검증한다. |
 | **LAT-PROVIDER-001 / L** 필수 연결 | OpenAI, Google AI Studio, standard Vertex, Anthropic Claude, vLLM, Ollama, 기타 API 호환 서버를 설정·진단·저장한다. | 각각 모델 응답뿐 아니라 tool 왕복·파일 수정·검증 흐름을 수행한다. 하나의 provider 성공만으로 전체 지원 완료로 표시하지 않는다. |
 | **LAT-PROVIDER-002 / L** 서버 위치 | localhost·LAN·외부 HTTPS·proxy prefix·선택 인증을 동일한 연결 모델로 지원한다. | 원격 vLLM/Ollama에서 인증·streaming·timeout·prefix를 실제 검증한다. 원격 추론 연결을 원격 shell로 오인하지 않는다. |
 | **LAT-PROVIDER-003 / L+P** capability | model/connection revision별 지원·검증·미지원 상태와 사용량·latency·옵션을 보여준다. | reasoning/vision/tools 옵션이 무조건 모든 모델에 전송되지 않는다. 모델 목록 성공만으로 agent tool 지원을 보장하지 않는다. |
 | **LAT-PROVIDER-004 / L** 인증 | API key는 Keychain, Vertex는 외부 ADC login 후 gcloud helper, custom header는 연결 scope로 처리한다. | 토큰 갱신·권한 부족·gcloud 없음·quota 설정 오류가 구분된다. redirect로 다른 origin에 인증을 넘기지 않는다. |
 | **LAT-PROVIDER-005 / L+P** 진단과 비용 | 요청/응답 ID, 실제 입력/output token, 추정치, cache/추론 usage 등 provider가 제공한 값을 구분해 표시한다. | local endpoint가 usage를 생략하면 “알 수 없음”으로 표시한다. 코드·비밀 원문 없이 연결 진단을 export할 수 있다. |
+| **LAT-PROVIDER-006 / L+P** 응답 종료 의미 | final/client tool/server continuation/blocked/truncated/empty 오류를 구분하고 provider state와 연결한다. 정상 HTTP와 작업 완료를 분리한다. | pause_turn·candidate 없음·refusal·미완료 hosted tool에서 빈 성공이나 로컬 도구 중복 실행이 없다. continuation도 취소·steering·예산·반복 한도를 따른다. |
+| **LAT-PROVIDER-007 / L+P** 실제 context | 모델 최대 길이·서버 설정 길이·요청 유효 길이를 따로 저장하고 tokenizer/추정치·출력 예약과 함께 사용한다. | 앱 32k/서버 4k 불일치를 드러내며 축약·요청 옵션·설정 안내 중 검증된 방법을 사용한다. 원격 서버의 전역 설정을 임의 변경하지 않는다. |
+| **LAT-PROVIDER-008 / L** 연결 갱신 | model alias/metadata·endpoint·credential revision 변경 때 관련 검증을 stale로 만들고 의존 세션·Ultra 역할·예약을 진단한다. | 삭제 전에 참조를 표시하고 명시적 이관 또는 비활성화를 제공한다. 과거 snapshot은 유지하며 같은 이름의 다른 모델로 조용히 대체하지 않는다. 실제 backend identity를 확인 못 하면 그 한계를 표시한다. |
 
 참고 동작: Desktop은 editor·terminal·preview 등 작업 pane을 제공하며 개발 서버의 실제 화면을 작업에 연결한다. 세부 기능 제공 여부는 실행 interface·provider·모델·계정 조건에 따라 다르므로 Lathe도 기능별 검증 상태를 표시한다. [Desktop 작업 화면](https://code.claude.com/docs/en/desktop), [공식 feature availability](https://code.claude.com/docs/en/feature-availability)
 
@@ -252,6 +273,9 @@ Lathe 개발 저장소에서 모든 변경을 커밋하는 팀의 개발 규칙�
 | **LAT-MCP-006 / L** 제작 검증 | schema/unit/protocol/실제 agent 왕복 검증을 통해 만든 서버를 사용한다. mock과 실제 연결 검증을 구분한다. | initialize→list→call→결과 활용과 실패/timeout/cancel을 통과해야 활성 검증 완료가 된다. destructive tool은 허용된 fixture 대상으로 검증한다. |
 | **LAT-MCP-007 / L+I** 유지·복구 | 서버 상태/로그/환경 진단, 수정·업데이트·재시험·reload·disable·이전 revision rollback을 제공한다. | 실패한 변경은 기존 정상 server/config를 유지한다. 불명확한 외부 부수효과는 자동 재호출/복원하지 않는다. |
 | **LAT-MCP-008 / L** 위임·활성화 경계 | 사용자 출처 grant로 설정 대상·runtime/dependency·network/effect 범위를 고정하고 검증된 revision을 활성화한다. | agent가 grant를 스스로 만들거나 deny를 바꾸지 못한다. Plan·grant 취소·범위 초과에서는 중지하고, grant 안의 MCP 제작/등록은 반복 승인 없이 이어진다. |
+| **LAT-MCP-009 / L+P** 비텍스트 결과 | text/structured/image/audio/resource link/embedded resource를 typed content로 보존하고 모델/API별 지원 경로로 전달한다. | screenshot 도구→이미지 blob→vision 판단→후속 재사용을 검증한다. 미지원 content를 조용히 버리거나 base64를 text로 보내고 이해했다고 표시하지 않는다. |
+| **LAT-MCP-010 / L+I** MCP server 모드 | Lathe의 선택된 파일·명령 도구를 외부 client가 사용하는 stdio server 모드를 제공한다. client별 workspace·tool subset·grant·수명을 제한하고 같은 broker/journal을 사용한다. | 외부 fixture client가 initialize/list/read/edit/run을 수행한다. 승인 client가 없으면 명확한 오류로 끝내며, MCP 입력만으로 새 권한을 발급하거나 자신의 server를 재귀 호출하지 않는다. |
+| **LAT-EXT-001 / L+I** plugin 의존성 | plugin 간 직접/전이 dependency·version 제약·source·lock과 설치/업데이트/disable/remove를 graph로 처리한다. | A→B 설치와 충돌/cycle/누락 실패를 구분한다. 업데이트 실패는 기존 정상 graph를 유지하고 B 제거 시 A의 실행 가능 상태를 재검사한다. package SDK lock과 구분한다. |
 
 ## 11. 외부/hosted 기능의 별도 계약
 
@@ -303,6 +327,14 @@ Lathe 개발 저장소에서 모든 변경을 커밋하는 팀의 개발 규칙�
 | **E2E-19 독립 검색** | LAT-TOOL-001/011/012, LAT-MCP-002 | local 모델로 코드 검색·웹 검색·본문 읽기·도구 검색을 구분 수행→출처→backend 실패/필터 미지원 표시 |
 | **E2E-20 MCP 자동 설정** | LAT-MCP-001~004/007/008 | 자연어 연결 요청→인증 참조→실제 시험→허용 scope 등록/활성화→호출→연결 단절·token 만료·설정 rollback |
 | **E2E-21 MCP 자체 제작** | LAT-MCP-005~008 | 요구 분석→server scaffold→build→schema/protocol 테스트→등록→agent가 새 도구 사용→업데이트 실패 복구·grant 취소 |
+| **E2E-22 실행 환경 재현** | LAT-EXEC-001~003, LAT-GIT-003 | profile 선택→fresh worktree setup→build/test→case별 증거→취소·setup 실패·0 tests·오래된 결과 구분 |
+| **E2E-23 실제 디버깅** | LAT-DEBUG-001~003, LAT-EXEC-001 | launch/attach→breakpoint→stack/variable→step→원인 수정→재실행; stale handle·adapter crash·외부 대상 detach |
+| **E2E-24 여러 저장소** | LAT-WORKSPACE-001, LAT-GIT-001~004 | frontend/backend root 추가→각 cwd·지침·권한으로 변경/검증→저장소별 diff→fork의 root 제거 격리·전역 철회·resume |
+| **E2E-25 편집 내용 보존** | LAT-UI-005/006, LAT-SESSION-005 | 미저장 buffer+외부 수정+agent patch→충돌 해결/선택 적용→undo→crash 복구→현재 revision 검증 |
+| **E2E-26 provider 경계** | LAT-PROVIDER-006~008 | 정상 HTTP pause/blocked/empty→제한된 continuation→context 불일치→동일 alias 교체→stale 진단·의존 profile 이관 |
+| **E2E-27 MCP 결과·역방향 연결** | LAT-MCP-009/010 | screenshot 이미지 판단·미지원 결과 보존; 같은 clientInfo의 두 외부 client→ingress별 scope 유지→무인 승인 오류·재귀 차단·취소 |
+| **E2E-28 plugin 의존성** | LAT-EXT-001 | A→B 설치→버전 충돌·cycle→실패한 업데이트 rollback→의존 plugin disable/remove |
+| **E2E-29 음성 입력** | LAT-UI-007 | 마이크 허가/거부→전사→기존 입력과 편집→명시적 전송→취소/실패 시 draft 보존 |
 
 필수 연결의 범위는 OpenAI, AI Studio, Vertex, Claude, vLLM, Ollama다. “기타 호환 서버”는 이름만 추가하는 대신 버전·모델·API flavor를 명시한 최소 한 개의 실제 추가 서버 fixture/smoke test를 남긴다. vision 등 P 기능은 지원 조합에서 시험하고 미지원 조합에서는 정확한 unavailable 동작을 시험한다.
 
