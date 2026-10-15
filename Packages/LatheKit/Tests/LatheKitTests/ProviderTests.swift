@@ -103,6 +103,72 @@ struct ProviderTests {
         #expect(messages[1]["tool_call_id"] as? String == "call_a")
     }
 
+    @Test func chatModernReasoningSurvivesFullToolRoundTripWithoutBecomingVisibleText() async throws {
+        let first = try fixtureSSE([
+            chatChunk(["reasoning": "검토 ", "reasoning_content": NSNull()]),
+            chatChunk(["reasoning": "조각 🌱"]),
+            chatChunk(["tool_calls": [["index": 0, "id": "modern_read", "type": "function",
+                                      "function": ["name": "read_file", "arguments": "{\"path\":\"README.md\"}"]]]], finish: "tool_calls")
+        ], done: true)
+        let second = try fixtureSSE([chatChunk(["content": "Done"], finish: "stop")], done: true)
+        let transport = ProviderFixtureTransport([first.map { Data([$0]) }, [second]])
+        let client = ModelClient(transport: transport)
+        let visible = ProviderText()
+        let step = try await client.step(profile: fixtureProfile(), credential: nil, messages: [.user("read")], tools: [readTool]) { await visible.append($0) }
+        #expect(step.outcome == .clientTools)
+        #expect(step.text.isEmpty)
+        #expect(await visible.value.isEmpty)
+        let final = try await client.step(profile: fixtureProfile(), credential: nil,
+                                         messages: [.user("read"), .assistant(step), .toolResult(callID: "modern_read", content: "fixture contents")], tools: [readTool]) { await visible.append($0) }
+        #expect(final.outcome == .final)
+        #expect(await visible.value == "Done")
+        let requests = await transport.requests
+        let bodyData = try #require(requests.last?.httpBody)
+        let body = try #require(try JSONSerialization.jsonObject(with: bodyData) as? [String: Any])
+        let messages = try #require(body["messages"] as? [[String: Any]])
+        #expect(messages[1]["reasoning"] as? String == "검토 조각 🌱")
+        #expect(messages[1]["reasoning_content"] == nil)
+        #expect(messages[2]["tool_call_id"] as? String == "modern_read")
+        #expect(messages[2]["content"] as? String == "fixture contents")
+    }
+
+    @Test func chatPreservesBothReasoningFieldNamesAndRejectsWrongTypes() async throws {
+        let wire = try fixtureSSE([
+            chatChunk(["reasoning": "modern ", "reasoning_content": "legacy "]),
+            chatChunk(["reasoning": "A", "reasoning_content": "B", "content": "answer"], finish: "stop")
+        ], done: true)
+        let step = try await ModelClient(transport: ProviderFixtureTransport([[wire]])).step(profile: fixtureProfile(), credential: nil, messages: [.user("test")], tools: []) { _ in }
+        let state = try #require(step.continuation)
+        let raw = try #require(try JSONSerialization.jsonObject(with: state.payload) as? [String: Any])
+        #expect(raw["reasoning"] as? String == "modern A")
+        #expect(raw["reasoning_content"] as? String == "legacy B")
+        #expect(step.text == "answer")
+        for field in ["reasoning", "reasoning_content"] {
+            for invalid in [42, true, ["value"], ["value": "text"]] as [Any] {
+                let malformed = try fixtureSSE([chatChunk([field: invalid, "content": "answer"], finish: "stop")], done: true)
+                await #expect(throws: ProviderError.unsupportedContent) {
+                    try await ModelClient(transport: ProviderFixtureTransport([[malformed]])).step(profile: fixtureProfile(), credential: nil, messages: [.user("test")], tools: []) { _ in }
+                }
+            }
+        }
+    }
+
+    @Test func chatReasoningFieldsShareOneUTF8ByteLimit() async throws {
+        let modern = String(repeating: "a", count: 512 * 1024)
+        let legacy = String(repeating: "b", count: 512 * 1024 - 3)
+        let chunks = [chatChunk(["reasoning": modern]), chatChunk(["reasoning_content": legacy]), chatChunk(["reasoning": "가"])]
+        let withinLimit = try fixtureSSE(chunks + [chatChunk(["content": "answer"], finish: "stop")], done: true)
+        let step = try await ModelClient(transport: ProviderFixtureTransport([[withinLimit]])).step(profile: fixtureProfile(), credential: nil, messages: [.user("test")], tools: []) { _ in }
+        let state = try #require(step.continuation)
+        let raw = try #require(try JSONSerialization.jsonObject(with: state.payload) as? [String: Any])
+        #expect((raw["reasoning"] as? String)?.utf8.count == 512 * 1024 + 3)
+        #expect((raw["reasoning_content"] as? String)?.utf8.count == 512 * 1024 - 3)
+        let overLimit = try fixtureSSE(chunks + [chatChunk(["reasoning_content": "x"]), chatChunk(["content": "answer"], finish: "stop")], done: true)
+        await #expect(throws: ProviderError.responseLimit) {
+            try await ModelClient(transport: ProviderFixtureTransport([[overLimit]])).step(profile: fixtureProfile(), credential: nil, messages: [.user("test")], tools: []) { _ in }
+        }
+    }
+
     @Test func EOFNeverAuthorizesPartialOrApparentlyFinishedCalls() async throws {
         for finish in [nil, "tool_calls"] as [String?] {
             let wire = try fixtureSSE([chatChunk(["tool_calls": [["index": 0, "id": "c", "function": ["name": "read_file", "arguments": "{}"]]]], finish: finish)])

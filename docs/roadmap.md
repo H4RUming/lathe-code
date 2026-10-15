@@ -77,7 +77,8 @@ GUI/CLI 공통 loop, Manual/Accept edits/Plan/Don't ask, 정확한 요청 hash�
 list/read/write/run_command, SHA precondition과 변경 전/결과 blob, 비대화형 native runner,
 취소·불명확한 실행 복구·자동 replay 금지. 최대 단계·호출 수 등 기본 한도를 적용한다.
 기본 앱은 mock이며 저장된 연결을 선택해야 실제 도구가 동작한다.
-실제 서비스/원격 vLLM 검증, 코드·웹 검색, 풍부한 편집·diff, 실행 profile과 테스트 증거,
+원격 vLLM 한 구성의 합성 파일·명령 왕복은 별도 live probe로 통과했다. 실제 OpenAI와 더 넓은 모델 구성,
+실패 테스트 조사·수정 게이트, 코드·웹 검색, 풍부한 편집·diff, 실행 profile과 테스트 증거,
 token/비용 budget·steering·Off/On capability는 남았다. 아래 목록과 게이트 전체를 완료한 것은 아니다.
 
 - 연결 설정·Keychain·환경 profile·URL prefix와 원격 인증.
@@ -231,4 +232,4 @@ Swift 앱/engine/CLI에 실제 Responses/Chat adapter와 도구 승인·파일·
 다음은 M1의 코드/웹 검색, patch·변경 미리보기, 실행 profile과 테스트 증거, 예산·모델 capability다.
 LLDB launch/attach timeout은 별도 미완료 게이트로 남기며 debugger 제품 연결 전에 해결한다.
 sandbox probe 통과를 production 격리 완료로 확대하지 않는다.
-HTTP fixture 왕복과 실제 파일/명령 실행 검증을 live OpenAI/vLLM 호환성이나 M1 전체 완료로 확대하지 않는다.
+HTTP fixture와 원격 vLLM 한 구성의 왕복 검증을 다른 서비스·모델의 호환성이나 M1 전체 완료로 확대하지 않는다.

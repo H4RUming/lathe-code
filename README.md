@@ -13,7 +13,8 @@ Vertex AI, Anthropic Claude, vLLM, Ollama 및 기타 모델 서버를 지원할 
 기본 선택은 **mock 모드**입니다. 설정에서 연결을 저장하고 작성창에서 선택한 실행만 실제 모델과
 도구를 사용합니다. 명령은 승인 후 **sandbox 없이 이 Mac에서 실행**됩니다.
 현재 범위·한도·사용법은 [첫 코딩 흐름](docs/coding-preview.md)을 참고하세요.
-실제 OpenAI/vLLM/Ollama 서버 검증, 검색·MCP·Ultra와 전체 기능 동등성은 아직 완료하지 않았습니다.
+원격 vLLM 한 구성에서 합성 파일 읽기·수정·명령 실행 왕복을 검증했습니다.
+실제 OpenAI/Ollama 서버, 다른 모델 구성, 검색·MCP·Ultra와 전체 기능 동등성은 아직 검증·구현 중입니다.
 
 ## 빌드와 실행
 

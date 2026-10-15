@@ -21,6 +21,8 @@ Base URL에 묶이며 SQLite profile, run snapshot, 이벤트에 키를 넣지 �
 `reasoning effort`는 입력한 값을 Responses의 `reasoning.effort`, Chat의 `reasoning_effort`로 전달한다.
 모델별 capability 검사, 로컬 Off/On 변환, Ultra는 아직 없다. 지원 여부는 서버 응답으로 드러나며
 미지원 옵션을 조용히 지우거나 추론을 켰다고 추정하지 않는다.
+Chat 서버가 반환하는 `reasoning` 및 이전 형식 `reasoning_content`는 답변 본문과 분리해
+원래 필드명으로 보존하고 다음 요청에 전달한다. 이것은 추론 Off/On 제어를 제공한다는 뜻은 아니다.
 
 ## 권한과 도구
 
@@ -108,7 +110,10 @@ helper SIGKILL 뒤 불명확한 효과는 [runner 계약](runner.md)을 따른�
 네이티브 앱에서도 연결 저장, 프로젝트 열기, fixture의 파일 수정·명령 실행 일회성 승인과 최종 응답을 확인했다.
 이 화면 검증은 격리된 테스트 데이터와 인증 없는 localhost 서버를 사용했다.
 명령과 실행 범위는 [개발 가이드](development.md#검증과-한계)를 따른다.
-**실제 OpenAI 계정이나 vLLM/Ollama 서버 검증은 아직 하지 않았다.** fixture 통과를 live 호환성으로 표시하지 않는다.
+2026-10-16에는 사용자 지정 원격 vLLM 0.27.1의 Qwen 계열 모델 한 구성에서 합성 파일 읽기 →
+정확한 수정 승인 → 고정 명령 승인·실행 → 최종 응답을 검증했다. 검사 6개가 통과했고 파일 내용,
+명령 stdout·stderr·exit code와 도구 완료 상태를 확인했다. [실제 서버 검사 범위](probes/provider.md)를 따른다.
+**OpenAI 계정·Ollama 및 다른 서버·모델 구성은 미검증이다.** 한 구성의 성공을 전체 호환성으로 확대하지 않는다.
 
 다음 M1 작업은 코드 검색·웹 검색/본문 읽기, patch/move/delete와 변경 미리보기, 실행 profile·테스트 증거,
 실행 예산과 모델 capability·Off/On 제어다. Google AI Studio·Vertex·Claude 전용 API와 Ollama native API,

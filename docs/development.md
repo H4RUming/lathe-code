@@ -152,16 +152,33 @@ python3 Scripts/probe-sandbox.py --output .build/probes/sandbox.json
 python3 Scripts/probe-lldb-dap.py --output .build/probes/lldb-dap.json
 ```
 
+실제 OpenAI 호환 서버는 사용자가 지정할 때만 별도로 검사한다. 다음 probe는 인증 없는 서버를 대상으로
+새 임시 프로젝트와 엔진을 만들고 합성 파일 읽기 → 정확한 수정 승인 → 고정 `printf` 승인 → 최종 응답을 확인한다.
+기존 연결·프로젝트·API 키를 사용하지 않으며 CI에서 자동 실행하지 않는다.
+
+```sh
+python3 Scripts/probe-provider.py --bin-dir .build/macos \
+  --base-url http://SERVER:8000/v1 --model MODEL_ID --allow-http \
+  --output .build/probes/live-provider.json
+```
+
+HTTPS에서는 `--allow-http`를 생략한다. probe는 최대 180초·8 model steps로 제한하고,
+지정한 합성 파일 수정과 단일 `printf` 외의 변경 요청은 거절한 뒤 중단한다.
+보고서에는 검사 결과·도구 상태만 기록하며 응답·추론·세션 transcript는 저장하지 않는다.
+
 테스트에는 실제 API 키가 필요 없다. smoke는 임시 프로젝트와 데이터, localhost HTTP fixture를 사용하며
 기본 앱 데이터와 개인 프로젝트를 사용하지 않는다. 테스트 전체 개수와 최종 CI 결과는 해당 commit의 실행 결과를 따른다.
 
 - 저장/전송 테스트는 transaction rollback·중복 방지·migration·복구·pagination·프레임 한도·취소·lease를 검사한다.
 - provider 계약 테스트는 split SSE·tool 왕복·opaque reasoning/continuation·종료 상태를 검사한다.
+- Chat의 `reasoning`과 이전 `reasoning_content`는 원래 필드명을 유지해 다음 도구 왕복에 전달한다.
+  두 필드 합산 UTF-8 1 MiB 한도와 잘못된 타입 거절을 검사한다.
 - tool 테스트는 경로·SHA·권한·승인 지연 뒤 cwd 교체·raw byte·timeout·취소·receipt 누락과 journal 재사용 금지를 검사한다.
 - 실제 HTTP 통합 fixture의 9개 검사가 로컬에서 통과했다. 공통 engine/CLI/runner를 통해
   read→승인된 write→승인된 shell→최종 응답, hash 불일치·중복 요청, Plan/dontAsk/거절,
   중간 EOF, 대기·shell·HTTP 취소, Responses reasoning replay, HTTP 307 redirect 거절을 확인했다.
-- 이 결과는 OpenAI 계정 또는 vLLM/Ollama 서버 검증이 아니다. 실제 vendor·서버 호환성은 미검증이다.
+- 별도 live probe는 원격 vLLM 0.27.1의 Qwen 계열 모델 한 구성에서 6개 검사를 통과했다.
+  [실제 서버 검사](probes/provider.md)는 합성 파일 편집과 고정 명령 왕복까지이며 다른 구성, OpenAI 계정과 Ollama는 미검증이다.
   Keychain 구현과 메모리 credential fixture 검증도 실제 사용자 키로 API를 호출한 검증과 구분한다.
 - 앱 모델 테스트는 `Apps/Lathe/Package.swift`의 별도 harness다. native 앱 build와 실제 화면 조작 검증은 따로 기록한다.
 - native 조작 검증은 프로젝트·mock 입력·중단·재접속·이력·Settings 흐름을 포함한다. 새 연결 설정 저장과 모델·권한 선택 화면도 확인했다. 격리된 프로젝트와 localhost fixture에서 앱의 일회성 파일 수정 승인 → 명령 승인 → 최종 응답 완료를 확인했다. 실제 API 키 저장은 이 조작 검증에 포함하지 않았다.

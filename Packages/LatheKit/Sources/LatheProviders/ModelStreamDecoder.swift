@@ -9,7 +9,8 @@ actor ModelStreamDecoder {
     private var receivedBytes = 0
     private var text = ""
     private var refusal = ""
-    private var reasoning = ""
+    private var reasoningFields: [String: String] = [:]
+    private var reasoningBytes = 0
     private var toolParts: [Int: ToolParts] = [:]
     private var chatFinish: String?
     private var completed: ModelStep?
@@ -69,10 +70,16 @@ actor ModelStreamDecoder {
             refusal += fragment
             guard refusal.utf8.count <= 65536 else { throw ProviderError.responseLimit }
         }
-        if let value = delta["reasoning_content"], !(value is NSNull) {
-            guard let fragment = value as? String else { throw ProviderError.unsupportedContent }
-            reasoning += fragment
-            guard reasoning.utf8.count <= 1024 * 1024 else { throw ProviderError.responseLimit }
+        // Current vLLM uses reasoning; older compatible servers use
+        // reasoning_content. Preserve each field without renaming or merging it.
+        for field in ["reasoning", "reasoning_content"] {
+            if let value = delta[field], !(value is NSNull) {
+                guard let fragment = value as? String else { throw ProviderError.unsupportedContent }
+                let bytes = fragment.utf8.count
+                guard bytes <= 1024 * 1024 - reasoningBytes else { throw ProviderError.responseLimit }
+                reasoningBytes += bytes
+                reasoningFields[field, default: ""] += fragment
+            }
         }
         if delta["audio"] != nil || delta["function_call"] != nil { throw ProviderError.unsupportedContent }
         if let rawCalls = delta["tool_calls"], !(rawCalls is NSNull) {
@@ -111,7 +118,7 @@ actor ModelStreamDecoder {
         default: throw ProviderError.invalidStream("지원하지 않는 Chat 종료 이유입니다.")
         }
         var raw: [String: Any] = ["role": "assistant", "content": text]
-        if !reasoning.isEmpty { raw["reasoning_content"] = reasoning }
+        for (field, value) in reasoningFields { raw[field] = value }
         if !calls.isEmpty { raw["tool_calls"] = calls.map { ["id": $0.id, "type": "function", "function": ["name": $0.name, "arguments": $0.arguments]] as [String: Any] } }
         let state = ModelContinuation(api: profile.api, baseURL: profile.baseURL, model: profile.model,
                                       payload: try JSONSerialization.data(withJSONObject: raw, options: [.sortedKeys]))
