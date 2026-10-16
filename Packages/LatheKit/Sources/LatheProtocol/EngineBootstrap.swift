@@ -1,9 +1,10 @@
 import Darwin
 import Foundation
 
-/// Acquire before opening the database. The descriptor holds the lifetime lease.
+/// Acquire before opening the database. This owner controls the lifetime lease.
 public final class EngineLease: @unchecked Sendable {
-    private let descriptor: Int32
+    /// Borrowed handle; this lease owns unlocking and closing it.
+    let descriptor: Int32
 
     public init(paths: EnginePaths) throws {
         let fd = try SocketSecurity.openLock(paths.engineLockPath)
@@ -30,12 +31,18 @@ public final class EngineLease: @unchecked Sendable {
             }
             descriptor = fd
         } catch {
+            _ = flock(fd, LOCK_UN)
             close(fd)
             throw error
         }
     }
 
-    deinit { close(descriptor) }
+    deinit {
+        // A concurrent spawn can briefly retain this open file description
+        // before exec applies CLOEXEC. End ownership now, even if it has copies.
+        _ = flock(descriptor, LOCK_UN)
+        close(descriptor)
+    }
 }
 
 public enum EngineBootstrap {
@@ -52,11 +59,13 @@ public enum EngineBootstrap {
                 }
                 try pause(until: deadline)
             }
+            defer { _ = flock(bootstrap, LOCK_UN) }
             if try isReady(paths: paths, deadline: deadline) { return }
 
             let lease = try SocketSecurity.openLock(paths.engineLockPath)
             let lockResult = flock(lease, LOCK_EX | LOCK_NB)
             let lockError = errno
+            if lockResult == 0 { _ = flock(lease, LOCK_UN) }
             close(lease)
             var child: EngineChild?
             if lockResult == 0 {

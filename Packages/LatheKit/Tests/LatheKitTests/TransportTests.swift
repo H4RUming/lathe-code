@@ -141,12 +141,36 @@ private struct TransportFixture: Sendable {
         let fixture = try TransportFixture()
         defer { fixture.cleanup() }
         var first: EngineLease? = try EngineLease(paths: fixture.paths)
+        weak var original = first
         _ = withExtendedLifetime(first) {
             #expect(throws: SocketTransportError.self) { try EngineLease(paths: fixture.paths) }
         }
         first = nil
+        #expect(original == nil)
         let second = try EngineLease(paths: fixture.paths)
         withExtendedLifetime(second) {}
+    }
+
+    @Test func engineLeaseReleaseDoesNotWaitForDuplicatedDescriptorToClose() throws {
+        let fixture = try TransportFixture()
+        defer { fixture.cleanup() }
+        var first: EngineLease? = try EngineLease(paths: fixture.paths)
+        weak var original = first
+        // dup and fork share the same flock. Keep a duplicate alive to model
+        // a concurrent spawn before exec closes its inherited CLOEXEC handles.
+        let descriptor = try #require(first?.descriptor)
+        let duplicate = fcntl(descriptor, F_DUPFD_CLOEXEC, 0)
+        try #require(duplicate >= 0)
+        defer { close(duplicate) }
+        #expect(fcntl(descriptor, F_GETFD) & FD_CLOEXEC != 0)
+        first = nil
+        #expect(original == nil)
+        #expect(fcntl(duplicate, F_GETFD) >= 0)
+
+        let replacement = try EngineLease(paths: fixture.paths)
+        _ = withExtendedLifetime(replacement) {
+            #expect(throws: SocketTransportError.self) { try EngineLease(paths: fixture.paths) }
+        }
     }
 
     @Test func staleSocketIsCleanedOnlyByLeaseAndLiveSocketIsPreserved() async throws {
