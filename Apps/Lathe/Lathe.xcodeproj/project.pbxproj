@@ -14,6 +14,7 @@
 		A10000000000000000000011 /* LatheProtocol in Frameworks */ = {isa = PBXBuildFile; productRef = A90000000000000000000002 /* LatheProtocol */; };
 		A10000000000000000000005 /* AppLifecycle.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000005 /* AppLifecycle.swift */; };
 		A10000000000000000000012 /* LatheEngineHost in Frameworks */ = {isa = PBXBuildFile; productRef = A90000000000000000000003 /* LatheEngineHost */; };
+		A10000000000000000000013 /* LatheLocalization in Frameworks */ = {isa = PBXBuildFile; productRef = A90000000000000000000004 /* LatheLocalization */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -26,7 +27,7 @@
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
-		A30000000000000000000001 /* Frameworks */ = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (A10000000000000000000010, A10000000000000000000011, A10000000000000000000012,); runOnlyForDeploymentPostprocessing = 0; };
+		A30000000000000000000001 /* Frameworks */ = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (A10000000000000000000010, A10000000000000000000011, A10000000000000000000012, A10000000000000000000013,); runOnlyForDeploymentPostprocessing = 0; };
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -43,7 +44,7 @@
 			buildRules = ();
 			dependencies = ();
 			name = Lathe;
-			packageProductDependencies = (A90000000000000000000001, A90000000000000000000002, A90000000000000000000003,);
+			packageProductDependencies = (A90000000000000000000001, A90000000000000000000002, A90000000000000000000003, A90000000000000000000004,);
 			productName = Lathe;
 			productReference = A20000000000000000000010 /* Lathe.app */;
 			productType = "com.apple.product-type.application";
@@ -101,6 +102,7 @@
 				ENABLE_HARDENED_RUNTIME = NO;
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Lathe;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright © 2026 Lathe contributors";
@@ -124,6 +126,7 @@
 				ENABLE_HARDENED_RUNTIME = NO;
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Lathe;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright © 2026 Lathe contributors";
@@ -151,6 +154,7 @@
 		A90000000000000000000001 /* LatheDomain */ = {isa = XCSwiftPackageProductDependency; package = A90000000000000000000010; productName = LatheDomain; };
 		A90000000000000000000002 /* LatheProtocol */ = {isa = XCSwiftPackageProductDependency; package = A90000000000000000000010; productName = LatheProtocol; };
 		A90000000000000000000003 /* LatheEngineHost */ = {isa = XCSwiftPackageProductDependency; package = A90000000000000000000010; productName = LatheEngineHost; };
+		A90000000000000000000004 /* LatheLocalization */ = {isa = XCSwiftPackageProductDependency; package = A90000000000000000000010; productName = LatheLocalization; };
 /* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = A60000000000000000000001 /* Project object */;

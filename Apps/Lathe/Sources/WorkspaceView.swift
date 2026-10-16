@@ -1,4 +1,5 @@
 import AppKit
+import LatheLocalization
 import LatheDomain
 import SwiftUI
 
@@ -9,7 +10,7 @@ struct WorkspaceView: View {
         NavigationSplitView {
             VStack(spacing: 0) {
                 List(selection: Binding(get: { model.selectedSessionID }, set: { model.selectSession($0) })) {
-                    Section("세션") {
+                    Section(L10n.text("sidebar.sessions.title")) {
                         ForEach(model.sessions) { session in
                             SessionRow(session: session).tag(session.id)
                         }
@@ -21,7 +22,7 @@ struct WorkspaceView: View {
                         VStack(spacing: 8) {
                             Image(systemName: "bubble.left.and.bubble.right")
                                 .font(.title2).foregroundStyle(.tertiary)
-                            Text("아직 세션이 없습니다").font(.callout).foregroundStyle(.secondary)
+                            Text(L10n.text("sidebar.sessions.empty")).font(.callout).foregroundStyle(.secondary)
                         }
                     }
                 }
@@ -33,8 +34,8 @@ struct WorkspaceView: View {
                     if model.isConnecting { ProgressView().controlSize(.mini) }
                     else {
                         Button { Task { await model.connect() } } label: { Image(systemName: "arrow.clockwise") }
-                            .buttonStyle(.plain).help("엔진에 다시 연결")
-                            .accessibilityLabel("엔진에 다시 연결")
+                            .buttonStyle(.plain).help(L10n.text("engine.reconnect"))
+                            .accessibilityLabel(L10n.text("engine.reconnect"))
                             .disabled(!model.acceptsUserActions)
                     }
                 }
@@ -43,11 +44,11 @@ struct WorkspaceView: View {
             .navigationSplitViewColumnWidth(min: 220, ideal: 260, max: 340)
             .toolbar {
                 ToolbarItem {
-                    Button { model.chooseProject() } label: { Label("프로젝트 열기", systemImage: "folder.badge.plus") }
+                    Button { model.chooseProject() } label: { Label(L10n.text("action.openProject"), systemImage: "folder.badge.plus") }
                         .disabled(!model.acceptsUserActions || !model.isConnected || model.isCreatingSession)
                 }
                 ToolbarItem {
-                    Button { model.newSession() } label: { Label("새 세션", systemImage: "square.and.pencil") }
+                    Button { model.newSession() } label: { Label(L10n.text("action.newSession"), systemImage: "square.and.pencil") }
                         .disabled(!model.acceptsUserActions || !model.isConnected || model.isCreatingSession)
                 }
             }
@@ -57,7 +58,7 @@ struct WorkspaceView: View {
                 if let session = model.selectedSession {
                     ConversationView(model: model, session: session)
                 } else if model.selectedSessionID != nil {
-                    ProgressView("세션을 읽는 중…").frame(maxWidth: .infinity, maxHeight: .infinity)
+                    ProgressView(L10n.text("session.loading")).frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
                     WelcomeView(model: model)
                 }
@@ -90,20 +91,20 @@ private struct WelcomeView: View {
             Image(systemName: "square.stack.3d.up.fill")
                 .font(.system(size: 42, weight: .light)).foregroundStyle(.tint)
             VStack(spacing: 10) {
-                Text("작업을 시작할 공간").font(.system(size: 27, weight: .semibold))
-                Text("프로젝트를 열고 작업을 시작하세요.")
+                Text(L10n.text("welcome.title")).font(.system(size: 27, weight: .semibold))
+                Text(L10n.text("welcome.description"))
                     .font(.body).foregroundStyle(.secondary)
             }
-            Button("프로젝트 열기…") { model.chooseProject() }
+            Button(L10n.text("action.chooseProject")) { model.chooseProject() }
                 .buttonStyle(.borderedProminent).controlSize(.large)
                 .disabled(!model.acceptsUserActions || !model.isConnected || model.isCreatingSession)
             VStack(spacing: 7) {
-                Text("설정에서 OpenAI 또는 OpenAI 호환 모델 서버를 연결하세요.")
-                Text("실제 모델은 도구 권한에 따라 프로젝트 파일과 명령을 사용할 수 있습니다.")
-                SettingsLink { Label("모델 연결 설정", systemImage: "gearshape") }
+                Text(L10n.text("welcome.connectProvider"))
+                Text(L10n.text("welcome.toolAccess"))
+                SettingsLink { Label(L10n.text("settings.openConnections"), systemImage: "gearshape") }
             }.font(.caption).foregroundStyle(.secondary)
             if !model.isConnected {
-                Button("엔진에 다시 연결") { Task { await model.connect() } }.disabled(!model.acceptsUserActions || model.isConnecting)
+                Button(L10n.text("engine.reconnect")) { Task { await model.connect() } }.disabled(!model.acceptsUserActions || model.isConnecting)
             }
         }
         .padding(40).frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -137,7 +138,7 @@ private struct ConversationView: View {
                             } label: {
                                 HStack {
                                     if model.isLoadingEarlier { ProgressView().controlSize(.small) }
-                                    Text("이전 대화 불러오기")
+                                    Text(L10n.text("conversation.loadEarlier"))
                                 }.frame(maxWidth: .infinity)
                             }
                             .buttonStyle(.borderless)
@@ -145,8 +146,8 @@ private struct ConversationView: View {
                         }
                         if session.runs.isEmpty {
                             VStack(alignment: .leading, spacing: 10) {
-                                Text("첫 메시지를 보내 보세요").font(.title2.weight(.semibold))
-                                Text("모델과 도구 권한을 선택하세요. 세션 기록은 앱에서 이어서 볼 수 있습니다.")
+                                Text(L10n.text("conversation.empty.title")).font(.title2.weight(.semibold))
+                                Text(L10n.text("conversation.empty.description"))
                                     .foregroundStyle(.secondary)
                             }.padding(.top, 34)
                         }
@@ -183,7 +184,7 @@ private struct RunView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 22) {
             VStack(alignment: .leading, spacing: 9) {
-                Text("나").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                Text(L10n.text("conversation.userRole")).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
                 Text(run.prompt).textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(16).background(.quaternary.opacity(0.45), in: RoundedRectangle(cornerRadius: 12))
@@ -196,18 +197,18 @@ private struct RunView: View {
                     if run.state == .running { ProgressView().controlSize(.mini) }
                 }
                 if run.response.isEmpty {
-                    Text(run.state == .running ? "응답을 준비하고 있습니다…" : "응답 내용이 없습니다.")
+                    Text(run.state == .running ? L10n.text("run.response.preparing") : L10n.text("run.response.empty"))
                         .foregroundStyle(.secondary)
                 } else {
                     Text(run.response).textSelection(.enabled).lineSpacing(5)
                 }
             }
             if let profile = run.configuration?.profile {
-                Text("\(profile.name) · \(profile.model)").font(.caption2).foregroundStyle(.secondary)
+                Text(L10n.format("run.profile", profile.name, profile.model)).font(.caption2).foregroundStyle(.secondary)
             }
             if let invocations = model.toolInvocations[run.id], !invocations.isEmpty {
                 VStack(alignment: .leading, spacing: 12) {
-                    Text("최근 도구 실행").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                    Text(L10n.text("run.tools.recent")).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
                     ForEach(invocations) { invocation in
                         ToolInvocationView(model: model, invocation: invocation, runIsActive: run.state == .running)
                     }
@@ -218,11 +219,11 @@ private struct RunView: View {
 
     private var stateLabel: String {
         switch run.state {
-        case .running: "응답 중"
-        case .completed: run.configuration?.profile == nil ? "완료 · 모의 응답" : "완료"
-        case .cancelled: "사용자가 중단함"
-        case .interrupted: "엔진 종료로 중단됨"
-        case .failed: "실행 실패"
+        case .running: L10n.text("run.state.running")
+        case .completed: run.configuration?.profile == nil ? L10n.text("run.state.completedMock") : L10n.text("run.state.completed")
+        case .cancelled: L10n.text("run.state.cancelled")
+        case .interrupted: L10n.text("run.state.interrupted")
+        case .failed: L10n.text("run.state.failed")
         }
     }
 }
@@ -232,16 +233,16 @@ private struct ComposerView: View {
     var body: some View {
         VStack(spacing: 10) {
             HStack {
-                Picker("모델", selection: $model.selectedProfileID) {
-                    Text("모의 모델 · 연결 시험").tag(UUID?.none)
+                Picker(L10n.text("composer.model.label"), selection: $model.selectedProfileID) {
+                    Text(L10n.text("model.mock.label")).tag(UUID?.none)
                     ForEach(model.profiles) { profile in Text(profile.name).tag(Optional(profile.id)) }
                 }.frame(maxWidth: 330)
-                Picker("도구 권한", selection: $model.permissionMode) {
+                Picker(L10n.text("composer.permissions.label"), selection: $model.permissionMode) {
                     ForEach(PermissionMode.allCases, id: \.rawValue) { mode in
                         Text(permissionTitle(mode)).tag(mode)
                     }
                 }.disabled(model.selectedProfile == nil)
-                SettingsLink { Image(systemName: "gearshape") }.help("모델 연결 설정")
+                SettingsLink { Image(systemName: "gearshape") }.help(L10n.text("settings.openConnections"))
             }.disabled(!model.canChangeRunConfiguration)
             if model.selectedProfile != nil {
                 Text(permissionDescription).font(.caption2).foregroundStyle(.secondary)
@@ -250,27 +251,27 @@ private struct ComposerView: View {
                 TextEditor(text: $model.draft)
                     .font(.body).scrollContentBackground(.hidden)
                     .frame(minHeight: 64, maxHeight: 130)
-                    .accessibilityLabel("메시지 입력")
+                    .accessibilityLabel(L10n.text("composer.input.accessibility"))
                     .overlay(alignment: .topLeading) {
                         if model.draft.isEmpty {
-                            Text("메시지를 입력하세요…").foregroundStyle(.tertiary)
+                            Text(L10n.text("composer.input.placeholder")).foregroundStyle(.tertiary)
                                 .padding(.leading, 5).padding(.top, 1).allowsHitTesting(false)
                         }
                     }
                 if model.isDraftOverLimit {
-                    Text("입력은 UTF-8 기준 32KiB 이하여야 합니다. 내용을 줄인 뒤 전송하세요.")
+                    Text(L10n.format("composer.input.tooLong", Int64(LatheAppModel.promptByteLimit / 1_024)))
                         .font(.caption).foregroundStyle(.orange)
                 }
                 HStack {
-                    Text("⌘ Return 전송 · Return 줄바꿈").font(.caption).foregroundStyle(.secondary)
+                    Text(L10n.text("composer.keyboardHelp")).font(.caption).foregroundStyle(.secondary)
                     Spacer()
-                    Text("\(model.draftByteCount.formatted()) / 32,768 bytes")
+                    Text(L10n.format("composer.byteCount", model.draftByteCount.formatted(), LatheAppModel.promptByteLimit.formatted()))
                         .font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
                     if model.selectedSession?.activeRun != nil {
-                        Button { model.stopRun() } label: { Label("중단", systemImage: "stop.fill") }
+                        Button { model.stopRun() } label: { Label(L10n.text("action.stopRun"), systemImage: "stop.fill") }
                             .disabled(!model.isConnected || model.isCancelling)
                     } else {
-                        Button { model.sendPrompt() } label: { Label("보내기", systemImage: "arrow.up") }
+                        Button { model.sendPrompt() } label: { Label(L10n.text("action.send"), systemImage: "arrow.up") }
                             .buttonStyle(.borderedProminent).keyboardShortcut(.return, modifiers: .command)
                             .disabled(!model.canSubmit)
                     }
@@ -280,7 +281,7 @@ private struct ComposerView: View {
             .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 14))
             .overlay { RoundedRectangle(cornerRadius: 14).strokeBorder(.quaternary, lineWidth: 1) }
             if model.selectedProfile == nil {
-                Text("모의 모델 · 파일 변경이나 외부 API 호출 없이 연결을 시험합니다.")
+                Text(L10n.text("model.mock.description"))
                     .font(.caption2).foregroundStyle(.secondary)
             }
         }
@@ -289,19 +290,19 @@ private struct ComposerView: View {
 
     private var permissionDescription: String {
         switch model.permissionMode {
-        case .fullAccess: "읽기·쓰기·명령 실행을 추가 승인 없이 허용합니다."
-        case .autoApprove: "위험이 낮은 읽기와 편집은 자동 승인하며 그 밖의 작업은 실행 전에 승인을 요청합니다."
-        case .acceptEdits: "읽기와 파일 편집은 자동 승인하며 명령 실행은 승인을 요청합니다."
-        case .requestApproval: "읽기·쓰기·명령 실행을 포함한 모든 도구에 실행 전 승인을 요청합니다."
+        case .fullAccess: L10n.text("permission.fullAccess.description")
+        case .autoApprove: L10n.text("permission.autoApprove.description")
+        case .acceptEdits: L10n.text("permission.acceptEdits.description")
+        case .requestApproval: L10n.text("permission.requestApproval.description")
         }
     }
 
     private func permissionTitle(_ mode: PermissionMode) -> String {
         switch mode {
-        case .fullAccess: "전체 권한"
-        case .autoApprove: "자동 승인"
-        case .acceptEdits: "편집 허용"
-        case .requestApproval: "승인 요청"
+        case .fullAccess: L10n.text("permission.fullAccess.title")
+        case .autoApprove: L10n.text("permission.autoApprove.title")
+        case .acceptEdits: L10n.text("permission.acceptEdits.title")
+        case .requestApproval: L10n.text("permission.requestApproval.title")
         }
     }
 }
@@ -321,28 +322,28 @@ private struct ToolInvocationView: View {
             }
             Text(invocation.summary).font(.caption).textSelection(.enabled)
             if invocation.effect == .shell {
-                Text("이 명령은 macOS 사용자 권한으로 실행하며 파일·네트워크 접근을 sandbox로 제한하지 않습니다.")
+                Text(L10n.text("tool.command.unsandboxed"))
                     .font(.caption).foregroundStyle(.orange)
             }
             if invocation.state == .pendingApproval {
-                Text("실행할 정확한 인자").font(.caption.weight(.medium))
+                Text(L10n.text("tool.approval.arguments")).font(.caption.weight(.medium))
                 ScrollView {
                     Text(invocation.arguments).font(.caption.monospaced()).textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }.frame(maxHeight: 180)
                 HStack {
                     Spacer()
-                    Button("거절") { model.decideApproval(invocation, approved: false) }
-                    Button("이번 한 번 허용") { model.decideApproval(invocation, approved: true) }
+                    Button(L10n.text("tool.approval.deny")) { model.decideApproval(invocation, approved: false) }
+                    Button(L10n.text("tool.approval.allowOnce")) { model.decideApproval(invocation, approved: true) }
                         .buttonStyle(.borderedProminent)
                 }.disabled(!model.acceptsUserActions || !model.isConnected || !runIsActive || model.decidingApprovals.contains(invocation.id))
             } else {
-                DisclosureGroup("요청 인자") {
+                DisclosureGroup(L10n.text("tool.arguments.title")) {
                     Text(invocation.arguments).font(.caption.monospaced()).textSelection(.enabled)
                 }
             }
             if let output = invocation.output, !output.isEmpty {
-                DisclosureGroup("실행 결과") {
+                DisclosureGroup(L10n.text("tool.output.title")) {
                     Text(output).font(.caption.monospaced()).textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
@@ -353,21 +354,21 @@ private struct ToolInvocationView: View {
 
     private var status: String {
         switch invocation.state {
-        case .pendingApproval: "승인 대기"
-        case .approved: "승인됨"
-        case .executing: "실행 중"
-        case .completed: "완료"
-        case .denied: "거절됨"
-        case .failed: "실패"
-        case .cancelled: "취소됨"
-        case .unknown: "결과 불명 · 자동 재실행 안 함"
+        case .pendingApproval: L10n.text("tool.state.pendingApproval")
+        case .approved: L10n.text("tool.state.approved")
+        case .executing: L10n.text("tool.state.executing")
+        case .completed: L10n.text("tool.state.completed")
+        case .denied: L10n.text("tool.state.denied")
+        case .failed: L10n.text("tool.state.failed")
+        case .cancelled: L10n.text("tool.state.cancelled")
+        case .unknown: L10n.text("tool.state.unknown")
         }
     }
 }
 
 private struct MockBadge: View {
     var body: some View {
-        Label("모의 모델 · 연결 시험", systemImage: "testtube.2")
+        Label(L10n.text("model.mock.label"), systemImage: "testtube.2")
             .font(.caption.weight(.medium)).foregroundStyle(.orange)
             .padding(.horizontal, 9).padding(.vertical, 5)
             .background(.orange.opacity(0.09), in: Capsule())
@@ -383,7 +384,7 @@ private struct ErrorBanner: View {
             Text(message).font(.callout).textSelection(.enabled)
             Spacer(minLength: 8)
             Button(action: dismiss) { Image(systemName: "xmark") }
-                .buttonStyle(.plain).accessibilityLabel("오류 메시지 닫기")
+                .buttonStyle(.plain).accessibilityLabel(L10n.text("error.dismiss.accessibility"))
         }.padding(14).background(.orange.opacity(0.08))
     }
 }

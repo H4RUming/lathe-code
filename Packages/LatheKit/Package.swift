@@ -3,9 +3,11 @@ import PackageDescription
 
 let package = Package(
     name: "LatheKit",
+    defaultLocalization: "ko",
     platforms: [.macOS(.v15)],
     products: [
         .library(name: "LatheDomain", targets: ["LatheDomain"]),
+        .library(name: "LatheLocalization", targets: ["LatheLocalization"]),
         .library(name: "LatheProtocol", targets: ["LatheProtocol"]),
         .library(name: "LatheExecution", targets: ["LatheExecution"]),
         .library(name: "LatheProviders", targets: ["LatheProviders"]),
@@ -17,6 +19,7 @@ let package = Package(
     ],
     targets: [
         .target(name: "LatheDomain"),
+        .target(name: "LatheLocalization", resources: [.process("Resources")]),
         .target(name: "LatheProtocol", dependencies: ["LatheDomain"]),
         .systemLibrary(name: "CSQLite"),
         .target(name: "CLatheExecution", publicHeadersPath: "include"),
@@ -29,6 +32,6 @@ let package = Package(
         .target(name: "LatheEngineHost", dependencies: ["LatheDomain", "LatheProtocol", "LatheRuntime", "LatheProviders"]),
         .executableTarget(name: "LatheEngine", dependencies: ["LatheDomain", "LatheProtocol", "LatheEngineHost"]),
         .executableTarget(name: "LatheCLI", dependencies: ["LatheDomain", "LatheProtocol"]),
-        .testTarget(name: "LatheKitTests", dependencies: ["LatheDomain", "LatheProtocol", "LatheRuntime", "LathePersistence", "LatheExecution", "LatheProviders", "LatheTools", "LatheEngineHost"]),
+        .testTarget(name: "LatheKitTests", dependencies: ["LatheDomain", "LatheProtocol", "LatheRuntime", "LathePersistence", "LatheExecution", "LatheProviders", "LatheTools", "LatheEngineHost", "LatheLocalization"]),
     ]
 )

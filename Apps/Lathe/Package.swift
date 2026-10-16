@@ -11,6 +11,7 @@ let package = Package(
             name: "LatheAppSupport",
             dependencies: [
                 .product(name: "LatheDomain", package: "LatheKit"),
+                .product(name: "LatheLocalization", package: "LatheKit"),
                 .product(name: "LatheProtocol", package: "LatheKit"),
                 .product(name: "LatheEngineHost", package: "LatheKit"),
             ],

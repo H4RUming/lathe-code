@@ -1,4 +1,5 @@
 import AppKit
+import LatheLocalization
 import LatheDomain
 import SwiftUI
 
@@ -18,8 +19,8 @@ struct EngineSettingsView: View {
 
     var body: some View {
         TabView {
-            connectionForm.tabItem { Label("모델 연결", systemImage: "network") }
-            engineForm.tabItem { Label("엔진과 데이터", systemImage: "externaldrive") }
+            connectionForm.tabItem { Label(L10n.text("settings.tab.connections"), systemImage: "network") }
+            engineForm.tabItem { Label(L10n.text("settings.tab.engine"), systemImage: "externaldrive") }
         }
         .padding(14).frame(width: 660, height: 680)
         .task { await model.ensureConnected() }
@@ -27,45 +28,45 @@ struct EngineSettingsView: View {
 
     private var connectionForm: some View {
         Form {
-            Section("연결 설정") {
-                Picker("저장된 연결", selection: $editingID) {
-                    Text("새 연결").tag(UUID?.none)
+            Section(L10n.text("settings.connection.section")) {
+                Picker(L10n.text("settings.connection.saved"), selection: $editingID) {
+                    Text(L10n.text("settings.connection.new")).tag(UUID?.none)
                     ForEach(model.profiles) { profile in Text(profile.name).tag(Optional(profile.id)) }
                 }.onChange(of: editingID) { loadSelection() }
-                TextField("이름", text: $name)
-                Picker("API 형식", selection: $api) {
-                    Text("OpenAI Responses").tag(ProviderAPI.openAIResponses)
-                    Text("OpenAI 호환 Chat Completions").tag(ProviderAPI.openAIChat)
+                TextField(L10n.text("settings.connection.name"), text: $name)
+                Picker(L10n.text("settings.connection.api"), selection: $api) {
+                    Text(L10n.text("settings.api.responses")).tag(ProviderAPI.openAIResponses)
+                    Text(L10n.text("settings.api.chat")).tag(ProviderAPI.openAIChat)
                 }
-                TextField("Base URL", text: $baseURL).textContentType(.URL)
-                TextField("모델 ID", text: $modelName)
-                TextField("Reasoning effort (선택)", text: $reasoningEffort)
-                Text("추론 옵션은 서버가 지원하는 값을 그대로 보냅니다. 로컬 Off/On/Ultra는 아직 제공하지 않습니다.")
+                TextField(L10n.text("settings.connection.baseURL"), text: $baseURL).textContentType(.URL)
+                TextField(L10n.text("settings.connection.model"), text: $modelName)
+                TextField(L10n.text("settings.connection.reasoningEffort"), text: $reasoningEffort)
+                Text(L10n.text("settings.connection.reasoningHelp"))
                     .font(.caption).foregroundStyle(.secondary)
-                Toggle("이 연결의 암호화되지 않은 HTTP 허용", isOn: $allowInsecureHTTP)
+                Toggle(L10n.text("settings.connection.allowHTTP"), isOn: $allowInsecureHTTP)
                 if allowInsecureHTTP {
-                    Text("HTTP에서는 API 키와 대화가 네트워크에 암호화되지 않고 전송됩니다.")
+                    Text(L10n.text("settings.connection.httpWarning"))
                         .font(.caption).foregroundStyle(.orange)
                 }
             }
-            Section("인증") {
-                SecureField("새 API 키 (빈 값은 기존 키 유지)", text: $apiKey).disabled(clearCredential)
-                Toggle("저장된 API 키 삭제", isOn: $clearCredential).disabled(!apiKey.isEmpty)
-                Text("키는 macOS Keychain에 저장합니다. 저장된 키는 앱에 표시하지 않습니다. 인증이 없는 개인 서버는 키 없이 연결할 수 있습니다.")
+            Section(L10n.text("settings.credentials.section")) {
+                SecureField(L10n.text("settings.credentials.newKey"), text: $apiKey).disabled(clearCredential)
+                Toggle(L10n.text("settings.credentials.deleteKey"), isOn: $clearCredential).disabled(!apiKey.isEmpty)
+                Text(L10n.text("settings.credentials.help"))
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section {
                 HStack {
                     if let savedMessage { Text(savedMessage).font(.caption).foregroundStyle(.secondary) }
                     Spacer()
-                    Button("새 연결") { editingID = nil; newProfileID = UUID(); loadSelection() }
-                    Button("저장") { save() }.buttonStyle(.borderedProminent)
+                    Button(L10n.text("settings.connection.new")) { editingID = nil; newProfileID = UUID(); loadSelection() }
+                    Button(L10n.text("action.save")) { save() }.buttonStyle(.borderedProminent)
                         .disabled(!model.acceptsUserActions || !model.isConnected || model.isSavingProfile || name.isEmpty || modelName.isEmpty)
                 }
-                if model.isSavingProfile { ProgressView("연결을 저장하는 중…") }
-                Text("vLLM·Ollama·개인 서버는 OpenAI 호환 API 주소를 사용하세요. 모델 서버 주소와 로컬 코드 실행 위치는 별개입니다.")
+                if model.isSavingProfile { ProgressView(L10n.text("settings.connection.saving")) }
+                Text(L10n.text("settings.connection.compatibleHelp"))
                     .font(.caption).foregroundStyle(.secondary)
-                Text("현재 Google AI Studio·Vertex·Claude 전용 API 어댑터는 지원하지 않습니다.")
+                Text(L10n.text("settings.connection.unsupportedProviders"))
                     .font(.caption).foregroundStyle(.secondary)
                 if let error = model.errorMessage { Text(error).font(.caption).foregroundStyle(.orange).textSelection(.enabled) }
             }
@@ -74,20 +75,20 @@ struct EngineSettingsView: View {
 
     private var engineForm: some View {
         Form {
-            Section("엔진") {
-                LabeledContent("상태", value: model.connectionLabel)
+            Section(L10n.text("engine.title")) {
+                LabeledContent(L10n.text("settings.engine.status"), value: model.connectionLabel)
                 if let info = model.engineInfo {
-                    LabeledContent("프로세스", value: String(info.processID))
-                    LabeledContent("프로토콜", value: String(info.protocolVersion))
+                    LabeledContent(L10n.text("settings.engine.process"), value: String(info.processID))
+                    LabeledContent(L10n.text("settings.engine.protocol"), value: String(info.protocolVersion))
                 }
-                Button("엔진에 다시 연결") { Task { await model.connect() } }.disabled(!model.acceptsUserActions || model.isConnecting)
+                Button(L10n.text("engine.reconnect")) { Task { await model.connect() } }.disabled(!model.acceptsUserActions || model.isConnecting)
             }
-            Section("로컬 데이터") {
+            Section(L10n.text("settings.data.section")) {
                 if let directory = model.dataDirectory {
                     Text(directory.path).font(.caption.monospaced()).textSelection(.enabled)
-                    Button("Finder에서 보기") { NSWorkspace.shared.open(directory) }
+                    Button(L10n.text("settings.data.showInFinder")) { NSWorkspace.shared.open(directory) }
                 }
-                Text("세션·도구 승인·실행 결과는 로컬에 보관됩니다. 엔진은 이 앱 안에서 실행되며 앱 종료 시 함께 중단됩니다. 작업 중 창을 닫으면 종료·백그라운드 유지·취소를 선택할 수 있습니다.")
+                Text(L10n.text("settings.data.lifecycleHelp"))
                     .font(.caption).foregroundStyle(.secondary)
             }
         }.formStyle(.grouped)
@@ -118,7 +119,7 @@ struct EngineSettingsView: View {
                 editingID = profile.id
                 apiKey = ""
                 clearCredential = false
-                savedMessage = "저장됨 · 다음 실행부터 적용"
+                savedMessage = L10n.text("settings.connection.savedMessage")
             }
         }
     }

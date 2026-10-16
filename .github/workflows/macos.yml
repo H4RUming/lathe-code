@@ -29,6 +29,8 @@ jobs:
           swift --version
       - name: Package tests
         run: swift test --package-path Packages/LatheKit --scratch-path .build/ci-tests
+      - name: Localization keys and native UI text
+        run: python3 Scripts/check-localization.py
       - name: Native app state regression tests
         run: swift test --package-path Apps/Lathe --scratch-path .build/ci-app-tests
       - name: Build native app and opt-in test tools

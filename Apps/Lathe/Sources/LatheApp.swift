@@ -1,4 +1,5 @@
 import AppKit
+import LatheLocalization
 import SwiftUI
 
 @main
@@ -14,17 +15,17 @@ struct LatheApp: App {
         .defaultSize(width: 1180, height: 790)
         .commands {
             CommandGroup(replacing: .newItem) {
-                Button("새 세션") { model.newSession() }
+                Button(L10n.text("action.newSession")) { model.newSession() }
                     .keyboardShortcut("n", modifiers: .command)
                     .disabled(!model.acceptsUserActions || !model.isConnected || model.isCreatingSession)
-                Button("프로젝트 열기…") { model.chooseProject() }
+                Button(L10n.text("action.chooseProject")) { model.chooseProject() }
                     .keyboardShortcut("o", modifiers: .command)
                     .disabled(!model.acceptsUserActions || !model.isConnected || model.isCreatingSession)
             }
-            CommandMenu("엔진") {
-                Button("다시 연결") { Task { await model.connect() } }
+            CommandMenu(L10n.text("engine.title")) {
+                Button(L10n.text("action.reconnect")) { Task { await model.connect() } }
                     .disabled(!model.acceptsUserActions || model.isConnecting)
-                Button("현재 실행 중단") { model.stopRun() }
+                Button(L10n.text("action.stopCurrentRun")) { model.stopRun() }
                     .keyboardShortcut(".", modifiers: .command)
                     .disabled(!model.acceptsUserActions || model.selectedSession?.activeRun == nil || !model.isConnected)
             }

@@ -1,0 +1,32 @@
+/* App lifecycle, project panel, connection status and app-level error messages. */
+/* %@ in error messages is the original diagnostic from the runtime or operating system. */
+
+"app.error.realModelUnsupported" = "This connection does not support a real model.";
+"app.error.providerSaveUnavailable" = "Provider settings cannot be saved.";
+"app.error.approvalUnavailable" = "Tool approval cannot be processed.";
+"app.connection.shuttingDown" = "Cleaning up and quitting";
+"app.connection.connecting" = "Connecting to the engine";
+"app.connection.connected" = "Local engine connected";
+"app.connection.disconnected" = "Engine disconnected";
+"app.error.engineIdentityMismatch" = "The connection does not match the engine owned by this app.";
+"app.error.connectionFailed" = "Could not connect to the engine. %@";
+"app.error.sessionReadFailed" = "Could not read the session. Reconnect to check its status. %@";
+"app.projectPicker.title" = "Choose a project to work on in Lathe";
+"app.projectPicker.open" = "Open Project";
+"app.error.submissionRejected" = "The request was rejected. %@";
+"app.error.submissionOutcomeUnknown" = "Could not confirm the request outcome. Reconnect to check the session status. %@";
+"app.error.submissionAcceptedStatusUnavailable" = "The request was accepted, but its status could not be read. Reconnect to check it. %@";
+"app.error.earlierRunsReadFailed" = "Could not read earlier conversations. %@";
+"app.error.cancellationStatusUnavailable" = "Could not confirm the cancellation status. %@";
+"app.error.sessionCreationFailed" = "Could not create the session. %@";
+"app.error.profileSaveFailed" = "Could not save the model connection. %@";
+"app.error.approvalStatusUnavailable" = "Could not confirm the approval status. %@";
+"app.error.runtimeConnectionLost" = "Could not confirm the connection to the app’s engine. Quitting the app also stops work in progress. %@";
+"app.exit.title" = "Quit Lathe?";
+"app.exit.message" = "Quitting stops and cleans up work in progress. Unsent drafts will be discarded. Keeping Lathe in the background lets the app and its work continue; you can reopen it from the menu bar.";
+"app.exit.stopAndQuit" = "Stop and Quit";
+"app.exit.keepInBackground" = "Keep in Background";
+"app.exit.cancel" = "Cancel";
+"app.menu.backgroundStatus" = "Lathe · Running in Background";
+"app.menu.open" = "Open Lathe";
+"app.menu.quit" = "Quit Lathe…";

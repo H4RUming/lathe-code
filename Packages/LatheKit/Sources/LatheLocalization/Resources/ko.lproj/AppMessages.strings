@@ -1,0 +1,32 @@
+/* App lifecycle, project panel, connection status and app-level error messages. */
+/* %@ in error messages is the original diagnostic from the runtime or operating system. */
+
+"app.error.realModelUnsupported" = "이 연결은 실제 모델을 지원하지 않습니다.";
+"app.error.providerSaveUnavailable" = "Provider 설정을 저장할 수 없습니다.";
+"app.error.approvalUnavailable" = "도구 승인을 처리할 수 없습니다.";
+"app.connection.shuttingDown" = "작업을 정리하고 종료하는 중";
+"app.connection.connecting" = "엔진에 연결하는 중";
+"app.connection.connected" = "로컬 엔진 연결됨";
+"app.connection.disconnected" = "엔진 연결 끊김";
+"app.error.engineIdentityMismatch" = "이 앱이 소유한 엔진과 연결 정보가 일치하지 않습니다.";
+"app.error.connectionFailed" = "엔진에 연결하지 못했습니다. %@";
+"app.error.sessionReadFailed" = "세션을 읽지 못했습니다. 다시 연결해 상태를 확인하세요. %@";
+"app.projectPicker.title" = "Lathe에서 작업할 프로젝트 선택";
+"app.projectPicker.open" = "프로젝트 열기";
+"app.error.submissionRejected" = "요청이 거절되었습니다. %@";
+"app.error.submissionOutcomeUnknown" = "요청 결과를 확인하지 못했습니다. 다시 연결해 세션 상태를 확인하세요. %@";
+"app.error.submissionAcceptedStatusUnavailable" = "요청은 접수되었지만 상태를 읽지 못했습니다. 다시 연결해 확인하세요. %@";
+"app.error.earlierRunsReadFailed" = "이전 대화를 읽지 못했습니다. %@";
+"app.error.cancellationStatusUnavailable" = "중단 상태를 확인하지 못했습니다. %@";
+"app.error.sessionCreationFailed" = "세션을 만들지 못했습니다. %@";
+"app.error.profileSaveFailed" = "모델 연결을 저장하지 못했습니다. %@";
+"app.error.approvalStatusUnavailable" = "승인 상태를 확인하지 못했습니다. %@";
+"app.error.runtimeConnectionLost" = "앱 내부 엔진 연결을 확인하지 못했습니다. 앱을 종료하면 진행 중인 작업도 중단됩니다. %@";
+"app.exit.title" = "Lathe를 종료할까요?";
+"app.exit.message" = "종료하면 진행 중인 작업을 중단하고 정리합니다. 보내지 않은 초안은 사라집니다. 백그라운드로 유지하면 앱과 작업이 계속 실행되며 메뉴 막대에서 다시 열 수 있습니다.";
+"app.exit.stopAndQuit" = "중단 후 종료";
+"app.exit.keepInBackground" = "백그라운드 유지";
+"app.exit.cancel" = "취소";
+"app.menu.backgroundStatus" = "Lathe · 백그라운드 실행 중";
+"app.menu.open" = "Lathe 열기";
+"app.menu.quit" = "Lathe 종료…";

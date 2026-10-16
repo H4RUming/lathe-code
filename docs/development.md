@@ -22,6 +22,25 @@ list/read/write/run_command를 사용한다. Google·Claude 전용 adapter, 검�
 
 일부 구현은 각 LAT 요구사항의 전체 수용 기준 통과를 뜻하지 않는다.
 
+## 앱 문구와 현지화
+
+앱의 고정 표시 문구는 `LatheLocalization`의 한국어·영어 `.strings` 리소스에서 관리한다.
+`Interface`는 화면·설정·권한·도구 상태 등 UI 문구를, `AppMessages`는 연결 상태·오류 안내·프로젝트 선택
+패널·종료 경고·백그라운드 메뉴를 담는다. 버튼뿐 아니라 tooltip과 접근성 설명도 같은 경로를 사용한다.
+Swift 코드는 `L10n.text` 또는 `L10n.format`에 문장 대신 의미를 나타내는 key와 table을 전달한다.
+예를 들어 `app.error.connectionFailed`는 한국어와 영어의 전체 오류 안내 문장을 보유하며 원래 오류는
+`%@`로 삽입한다. 단어·문장 조각 연결로 어순을 고정하지 않는다.
+
+한국어·영어에 같은 key와 호환되는 placeholder를 유지하고 리소스를 앱 배포 번들에 포함한다.
+현재 현지화 범위는 앱 UI와 앱의 안내 문구다. 코어의 도구 요약·실행 결과, 개발 CLI·provider/protocol의 원시 진단,
+모델 prompt·응답·사용자 내용까지 번역했다고 주장하지 않는다. 원시 진단은 번역된 앱 안내에 그대로
+포함되므로 한 오류 카드 안에 언어가 섞일 수 있다. AppModel 회귀 검사는 한국어 부분 문자열 대신
+리소스로 만든 기대 문구를 비교하므로 실행 환경의 언어에 의존하지 않는다.
+
+`python3 Scripts/check-localization.py`는 한국어·영어 table/key 일치, 중복 key, format 인자 타입,
+앱 호출의 누락 key와 고정 UI 문자열을 검사하며 CI에서도 실행한다. 현지화 변경 후 코어 88개와
+앱 모델 19개 테스트가 통과했고 125개 key, 실제 `.app`의 6개 번역 리소스와 지원 언어 선언을 확인했다.
+
 ## 빌드
 
 최소 deployment target은 **macOS 15.0**, Swift 언어 모드는 **6**이다.

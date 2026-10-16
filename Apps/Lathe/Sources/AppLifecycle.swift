@@ -1,4 +1,5 @@
 import AppKit
+import LatheLocalization
 import SwiftUI
 
 /// AppKit owns the quit decision so both Command-Q and the last workspace's red
@@ -55,11 +56,11 @@ final class AppLifecycleDelegate: NSObject, NSApplicationDelegate {
                 sender.activate(ignoringOtherApps: true)
                 let alert = NSAlert()
                 alert.alertStyle = .warning
-                alert.messageText = "Lathe를 종료할까요?"
-                alert.informativeText = "종료하면 진행 중인 작업을 중단하고 정리합니다. 보내지 않은 초안은 사라집니다. 백그라운드로 유지하면 앱과 작업이 계속 실행되며 메뉴 막대에서 다시 열 수 있습니다."
-                alert.addButton(withTitle: "중단 후 종료")
-                alert.addButton(withTitle: "백그라운드 유지")
-                alert.addButton(withTitle: "취소")
+                alert.messageText = L10n.text("app.exit.title", table: "AppMessages")
+                alert.informativeText = L10n.text("app.exit.message", table: "AppMessages")
+                alert.addButton(withTitle: L10n.text("app.exit.stopAndQuit", table: "AppMessages"))
+                alert.addButton(withTitle: L10n.text("app.exit.keepInBackground", table: "AppMessages"))
+                alert.addButton(withTitle: L10n.text("app.exit.cancel", table: "AppMessages"))
                 alert.buttons.last?.keyEquivalent = "\u{1b}"
                 switch alert.runModal() {
                 case .alertFirstButtonReturn:
@@ -97,14 +98,14 @@ final class AppLifecycleDelegate: NSObject, NSApplicationDelegate {
     private func enterBackground() {
         if statusItem == nil {
             let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-            item.button?.image = NSImage(systemSymbolName: "hammer.circle", accessibilityDescription: "Lathe · 백그라운드 실행 중")
-            item.button?.toolTip = "Lathe · 백그라운드 실행 중"
+            item.button?.image = NSImage(systemSymbolName: "hammer.circle", accessibilityDescription: L10n.text("app.menu.backgroundStatus", table: "AppMessages"))
+            item.button?.toolTip = L10n.text("app.menu.backgroundStatus", table: "AppMessages")
             let menu = NSMenu()
-            let open = NSMenuItem(title: "Lathe 열기", action: #selector(showWorkspace), keyEquivalent: "")
+            let open = NSMenuItem(title: L10n.text("app.menu.open", table: "AppMessages"), action: #selector(showWorkspace), keyEquivalent: "")
             open.target = self
             menu.addItem(open)
             menu.addItem(.separator())
-            let quit = NSMenuItem(title: "Lathe 종료…", action: #selector(quitFromMenu), keyEquivalent: "")
+            let quit = NSMenuItem(title: L10n.text("app.menu.quit", table: "AppMessages"), action: #selector(quitFromMenu), keyEquivalent: "")
             quit.target = self
             menu.addItem(quit)
             item.menu = menu

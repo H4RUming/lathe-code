@@ -1,5 +1,6 @@
 import Foundation
 import LatheDomain
+import LatheLocalization
 import LatheProtocol
 import Testing
 @testable import LatheAppSupport
@@ -49,7 +50,8 @@ struct AppModelTests {
         try await waitUntil { !model.isSubmitting }
         #expect(model.isConnected)
         #expect(model.draft == "수정할 요청")
-        #expect(model.errorMessage?.contains("거절") == true)
+        #expect(model.errorMessage == L10n.format("app.error.submissionRejected", table: "AppMessages",
+                                                   RPCFailure(code: code, message: "request rejected").localizedDescription))
         let calls = await engine.eventQueryCount
         try await waitUntil { await engine.eventQueryCount > calls }
     }
@@ -64,7 +66,8 @@ struct AppModelTests {
         try await waitUntil { !model.isSubmitting }
         #expect(!model.isConnected)
         #expect(model.draft == "결과를 알 수 없는 요청")
-        #expect(model.errorMessage?.contains("결과를 확인하지 못했습니다") == true)
+        #expect(model.errorMessage == L10n.format("app.error.submissionOutcomeUnknown", table: "AppMessages",
+                                                   LatheError.transport("injected connection loss").localizedDescription))
     }
 
     @Test func delayedSubmissionPreservesNewDraftInAnotherSession() async throws {
@@ -233,7 +236,8 @@ struct AppModelTests {
         await model.connect()
         #expect(!model.isConnected)
         #expect(model.sessions.isEmpty)
-        #expect(model.errorMessage?.contains("소유한 엔진") == true)
+        let identityError = LatheError.transport(L10n.text("app.error.engineIdentityMismatch", table: "AppMessages"))
+        #expect(model.errorMessage == L10n.format("app.error.connectionFailed", table: "AppMessages", identityError.localizedDescription))
         await model.shutdown()
     }
 

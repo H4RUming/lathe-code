@@ -1,0 +1,4 @@
+/* Small stable diagnostics used to verify language selection and formatting. */
+"localization.language" = "English";
+"localization.format" = "%1$@ has %2$ld tasks.";
+"localization.reorderedFormat" = "%1$ld items · %2$@";

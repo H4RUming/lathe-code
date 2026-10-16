@@ -3,6 +3,7 @@ import Combine
 import Foundation
 import LatheDomain
 import LatheEngineHost
+import LatheLocalization
 import LatheProtocol
 
 protocol AppEngineHost: Sendable {
@@ -31,14 +32,14 @@ extension AppEngineClient {
     func providerProfiles() async throws -> [ProviderProfile] { [] }
     func invocations(runID: UUID) async throws -> [ToolInvocationSnapshot] { [] }
     func submitConfigured(sessionID: UUID, prompt: String, requestID: UUID, configuration: RunConfiguration?) async throws -> RunSnapshot {
-        guard configuration?.profile == nil else { throw LatheError.invalidRequest("이 연결은 실제 모델을 지원하지 않습니다.") }
+        guard configuration?.profile == nil else { throw LatheError.invalidRequest(L10n.text("app.error.realModelUnsupported", table: "AppMessages")) }
         return try await submit(sessionID: sessionID, prompt: prompt, requestID: requestID)
     }
     func saveProviderProfile(_ profile: ProviderProfile, apiKey: String?, clearCredential: Bool) async throws -> [ProviderProfile] {
-        throw LatheError.invalidRequest("Provider 설정을 저장할 수 없습니다.")
+        throw LatheError.invalidRequest(L10n.text("app.error.providerSaveUnavailable", table: "AppMessages"))
     }
     func decideApproval(invocationID: UUID, requestHash: String, approved: Bool) async throws -> ToolInvocationSnapshot {
-        throw LatheError.invalidRequest("도구 승인을 처리할 수 없습니다.")
+        throw LatheError.invalidRequest(L10n.text("app.error.approvalUnavailable", table: "AppMessages"))
     }
 }
 
@@ -108,9 +109,9 @@ final class LatheAppModel: ObservableObject {
     }
 
     var connectionLabel: String {
-        if isShuttingDown { return "작업을 정리하고 종료하는 중" }
-        if isConnecting { return "엔진에 연결하는 중" }
-        return isConnected ? "로컬 엔진 연결됨" : "엔진 연결 끊김"
+        if isShuttingDown { return L10n.text("app.connection.shuttingDown", table: "AppMessages") }
+        if isConnecting { return L10n.text("app.connection.connecting", table: "AppMessages") }
+        return isConnected ? L10n.text("app.connection.connected", table: "AppMessages") : L10n.text("app.connection.disconnected", table: "AppMessages")
     }
 
     func ensureConnected() async {
@@ -165,7 +166,7 @@ final class LatheAppModel: ObservableObject {
             let info = try await client.connect()
             if let ownedInfo {
                 guard info.engineID == ownedInfo.engineID, info.processID == ownedInfo.processID else {
-                    throw LatheError.transport("이 앱이 소유한 엔진과 연결 정보가 일치하지 않습니다.")
+                    throw LatheError.transport(L10n.text("app.error.engineIdentityMismatch", table: "AppMessages"))
                 }
             }
             let latest = try await client.listSessions()
@@ -188,7 +189,7 @@ final class LatheAppModel: ObservableObject {
         } catch {
             guard generation == connectionGeneration else { return }
             isConnected = false
-            errorMessage = "엔진에 연결하지 못했습니다. \(error.localizedDescription)"
+            errorMessage = L10n.format("app.error.connectionFailed", table: "AppMessages", error.localizedDescription)
         }
     }
 
@@ -201,7 +202,7 @@ final class LatheAppModel: ObservableObject {
             do { try await refreshSelectedSession(using: client) }
             catch {
                 guard generation == selectionGeneration else { return }
-                disconnectAfterFailure("세션을 읽지 못했습니다. 다시 연결해 상태를 확인하세요.", error: error)
+                disconnectAfterFailure("app.error.sessionReadFailed", error: error)
             }
         }
     }
@@ -220,8 +221,8 @@ final class LatheAppModel: ObservableObject {
     func chooseProject() {
         guard acceptsUserActions else { return }
         let panel = NSOpenPanel()
-        panel.title = "Lathe에서 작업할 프로젝트 선택"
-        panel.prompt = "프로젝트 열기"
+        panel.title = L10n.text("app.projectPicker.title", table: "AppMessages")
+        panel.prompt = L10n.text("app.projectPicker.open", table: "AppMessages")
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
         panel.allowsMultipleSelection = false
@@ -259,9 +260,9 @@ final class LatheAppModel: ObservableObject {
                 guard !isShuttingDown else { return }
                 if let failure = error as? RPCFailure,
                    [-32600, -32601, -32602, -32004, -32009].contains(failure.code) {
-                    errorMessage = "요청이 거절되었습니다. \(failure.localizedDescription)"
+                    errorMessage = L10n.format("app.error.submissionRejected", table: "AppMessages", failure.localizedDescription)
                 } else {
-                    disconnectAfterFailure("요청 결과를 확인하지 못했습니다. 다시 연결해 세션 상태를 확인하세요.", error: error)
+                    disconnectAfterFailure("app.error.submissionOutcomeUnknown", error: error)
                 }
                 return
             }
@@ -272,7 +273,7 @@ final class LatheAppModel: ObservableObject {
                 try await refreshSessions(using: client)
                 try await refreshSelectedSession(using: client)
             } catch {
-                disconnectAfterFailure("요청은 접수되었지만 상태를 읽지 못했습니다. 다시 연결해 확인하세요.", error: error)
+                disconnectAfterFailure("app.error.submissionAcceptedStatusUnavailable", error: error)
             }
         }
     }
@@ -292,7 +293,7 @@ final class LatheAppModel: ObservableObject {
                 try await refreshTools(for: page.runs, using: client, generation: generation)
             } catch {
                 guard generation == selectionGeneration else { return }
-                errorMessage = "이전 대화를 읽지 못했습니다. \(error.localizedDescription)"
+                errorMessage = L10n.format("app.error.earlierRunsReadFailed", table: "AppMessages", error.localizedDescription)
             }
         }
     }
@@ -306,7 +307,7 @@ final class LatheAppModel: ObservableObject {
                 _ = try await client.cancel(runID: run.id)
                 try await refreshSelectedSession(using: client)
             } catch {
-                errorMessage = "중단 상태를 확인하지 못했습니다. \(error.localizedDescription)"
+                errorMessage = L10n.format("app.error.cancellationStatusUnavailable", table: "AppMessages", error.localizedDescription)
             }
         }
     }
@@ -321,7 +322,7 @@ final class LatheAppModel: ObservableObject {
             try await refreshSessions(using: client)
             selectSession(session.id)
         } catch {
-            errorMessage = "세션을 만들지 못했습니다. \(error.localizedDescription)"
+            errorMessage = L10n.format("app.error.sessionCreationFailed", table: "AppMessages", error.localizedDescription)
         }
     }
 
@@ -376,7 +377,7 @@ final class LatheAppModel: ObservableObject {
             if canChangeRunConfiguration { selectedProfileID = profile.id }
             return true
         } catch {
-            errorMessage = "모델 연결을 저장하지 못했습니다. \(error.localizedDescription)"
+            errorMessage = L10n.format("app.error.profileSaveFailed", table: "AppMessages", error.localizedDescription)
             return false
         }
     }
@@ -399,7 +400,7 @@ final class LatheAppModel: ObservableObject {
                 }
             } catch {
                 guard generation == selectionGeneration else { return }
-                errorMessage = "승인 상태를 확인하지 못했습니다. \(error.localizedDescription)"
+                errorMessage = L10n.format("app.error.approvalStatusUnavailable", table: "AppMessages", error.localizedDescription)
             }
         }
     }
@@ -413,11 +414,11 @@ final class LatheAppModel: ObservableObject {
         }
     }
 
-    private func disconnectAfterFailure(_ message: String, error: Error) {
+    private func disconnectAfterFailure(_ messageKey: String, error: Error) {
         guard !isShuttingDown else { return }
         isConnected = false
         pollTask?.cancel()
-        errorMessage = "\(message) \(error.localizedDescription)"
+        errorMessage = L10n.format(messageKey, table: "AppMessages", error.localizedDescription)
     }
 
     private func startPolling(using client: any AppEngineClient, generation: UInt64) {
@@ -439,7 +440,7 @@ final class LatheAppModel: ObservableObject {
                 } catch {
                     guard self.connectionGeneration == generation else { return }
                     self.isConnected = false
-                    self.errorMessage = "앱 내부 엔진 연결을 확인하지 못했습니다. 앱을 종료하면 진행 중인 작업도 중단됩니다. \(error.localizedDescription)"
+                    self.errorMessage = L10n.format("app.error.runtimeConnectionLost", table: "AppMessages", error.localizedDescription)
                     return
                 }
             }

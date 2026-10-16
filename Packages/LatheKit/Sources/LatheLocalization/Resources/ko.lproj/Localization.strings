@@ -1,0 +1,4 @@
+/* Small stable diagnostics used to verify language selection and formatting. */
+"localization.language" = "한국어";
+"localization.format" = "%1$@에 작업 %2$ld개가 있습니다.";
+"localization.reorderedFormat" = "%2$@ · %1$ld개";
