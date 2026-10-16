@@ -10,7 +10,7 @@
 SwiftUI/AppKit 앱 프로세스 안의 EngineHost가 runtime, SQLite와 blob 저장소를 소유한다.
 개발용 CLI는 실행 중인 앱에 연결하는 선택 도구이며 일반 배포/설치 구성 요소가 아니다.
 기본 mock은 외부 API나 파일 도구를 호출하지 않는다. 실제 연결을 고르면 Responses 또는 Chat API와
-list/read/write/run_command를 사용한다. Google·Claude 전용 adapter, 검색·MCP·Ultra·편집기·디버거는 후속이다.
+list/read/write/run_command와 파일명·내용 검색을 사용한다. Google·Claude 전용 adapter, 웹 검색·MCP·Ultra·편집기·디버거는 후속이다.
 프로젝트를 선택하는 것만으로 파일 수집이나 스크립트 실행을 시작하지 않는다.
 
 | 관련 요구사항 | 현재 구현 | 남은 범위 |
@@ -18,7 +18,7 @@ list/read/write/run_command를 사용한다. Google·Claude 전용 adapter, 검�
 | LAT-CORE-001/002/006 | 실제 단일 모델/tool loop, 스트림·취소·재접속 | steering·retry·질문·context 관리 확대 |
 | SESSION 계열 | 세션/run/event, context blob, 중복 submit 방지·복구 | fork/rewind/archive/export·실패한 작업 재개 |
 | UI/CLI 계열 | 네이티브 연결 설정·Keychain 입력·승인 카드·개발 client 공통 연결 | 편집기/PTY/diff/전체 결과 조회·접근성 검증 확대 |
-| TOOL/EXEC/PERM 기반 | 네 도구·SHA 사전조건·일회 승인·runner journal | 검색·풍부한 편집·실행 profile·production 격리·background |
+| TOOL/EXEC/PERM 기반 | 여섯 도구·bounded 코드 검색·SHA 사전조건·일회 승인·runner journal | 정규식/ignore·웹 검색·풍부한 편집·실행 profile·production 격리·background |
 
 일부 구현은 각 LAT 요구사항의 전체 수용 기준 통과를 뜻하지 않는다.
 
@@ -207,6 +207,11 @@ context는 바로 앞 완료 run의 동일 profile snapshot만 이어간다. 실
 
 ## 검증과 한계
 
+2026-10-16 언어 설정 분리·코드 검색 검증: 코어 119개·앱 상태 23개 테스트, 네이티브 빌드,
+localhost agent fixture 13개와 이동된 helper의 한국어/영어 혼합 설정 검사가 통과했다.
+검색에는 네 모드 왕복·승인 전 비노출·링크/root 교체·UTF-8·페이지/작업량 한도 검사를 포함한다.
+격리된 실제 앱에서 화면 언어 전환·미저장 연결 폼 보존·앱 영어/오류 한국어 선택과 재실행 복원을 확인했다.
+
 2026-10-16 권한 개편 검증: 코어 84개·앱 모델 19개 테스트, 네이티브 앱 빌드,
 localhost agent fixture 11개와 격리된 실제 앱 수명 검사 4개가 통과했다.
 전체 권한/자동 승인/편집 허용/승인 요청과 읽기 승인 전 비노출·baseline 저장 경계를 포함한다.
@@ -267,5 +272,9 @@ HTTPS에서는 `--allow-http`를 생략한다. probe는 최대 180초·8 model s
 - [LLDB-DAP probe](probes/lldb-dap.md)는 컴파일·initialize 성공, 실제 launch/attach timeout으로 실패 상태다.
   CI의 수동 `debugger_probe`는 timeout을 실패로 기록하고 명시적인 환경 제한만 unsupported로 구분한다.
 
-다음 M1 단위는 코드/웹 검색, 편집·변경 미리보기, 실행 profile과 테스트 증거, budget·모델 capability다.
+`find_files`와 `search_content`는 앱 내부에서 제한된 파일명 glob·일반 문자열 검색을 수행한다.
+자동 승인에서도 재귀 검색은 승인받고, 결과에는 제외 범위·페이지·작업량 한도를 명시한다.
+입력·출력·미지원 정규식/ignore 범위는 [코드 검색 계약](coding-preview.md#프로젝트-코드-검색)을 따른다.
+
+다음 M1 단위는 코드 검색 확장·웹 검색, 편집·변경 미리보기, 실행 profile과 테스트 증거, budget·모델 capability다.
 debugger timeout과 production sandbox는 독립된 미완료 게이트로 추적한다.

@@ -76,7 +76,7 @@ class FixtureServer(ThreadingHTTPServer):
             assert self.requests[scenario] <= 8, "Unbounded model retry loop"
         assert body["model"] == "fixture-model" and body["stream"] is True
         assert {t["name"] if api == "responses" else t["function"]["name"] for t in body["tools"]} == {
-            "read_file", "write_file", "list_directory", "run_command"}
+            "read_file", "write_file", "list_directory", "run_command", "find_files", "search_content"}
         results = [m for m in messages if m.get("role") == "tool" or m.get("type") == "function_call_output"]
         if api == "responses":
             assert path == "/prefix/v1/responses", path
@@ -97,6 +97,36 @@ class FixtureServer(ThreadingHTTPServer):
             return sse({"type": "response.output_text.delta", "delta": text}) + \
                 sse({"type": "response.completed", "response": {"status": "completed", "output": output}})
         assert path == "/prefix/v1/chat/completions", path
+        if scenario.startswith("search-"):
+            search = {"path": ".", "nameGlob": "*.swift", "includeHidden": False, "offset": 0, "limit": 10}
+            if scenario == "search-denied":
+                if not results:
+                    return chat_tool("search_content", {**search, "nameGlob": "*", "includeHidden": True,
+                                     "query": "fixture-secret", "caseSensitive": True}, "denied_search")
+                assert len(results) == 1 and results[0]["content"] in translations("RuntimeMessages", "runtime.approval.userDenied")
+                assert "synthetic-only" not in results[0]["content"]
+                return chat_final("Denied recursive search disclosed no content.")
+            if not results:
+                return chat_tool("find_files", search, "search_files")
+            files = json.loads(results[0]["content"])
+            assert files["kind"] == "files" and files["matches"] == [{"path": "Sources/Feature.swift"}]
+            assert files["nextOffset"] is None and not files["truncated"]
+            assert files["exclusions"]["gitignoreApplied"] is False
+            if len(results) == 1:
+                return chat_tool("search_content", {**search, "query": "needle 🌱", "caseSensitive": True}, "search_lines")
+            content = json.loads(results[1]["content"])
+            assert content["kind"] == "content" and len(content["matches"]) == 1
+            match = content["matches"][0]
+            assert match["path"] == files["matches"][0]["path"] and match["line"] == 2
+            assert "needle 🌱" in match["text"] and not match["snippetTruncated"]
+            assert match["sha256"] == hashlib.sha256("// fixture\nlet value = \"needle 🌱\"\n".encode()).hexdigest()
+            assert not content["truncated"] and content["nextOffset"] is None
+            if len(results) == 2:
+                return chat_tool("read_file", {"path": match["path"]}, "search_read")
+            assert len(results) == 3
+            read = json.loads(results[2]["content"])
+            assert read["sha256"] == match["sha256"] and read["content"] == "// fixture\nlet value = \"needle 🌱\"\n"
+            return chat_final("Found the code and read the matching file.")
         if scenario in {"flow", "full-access", "full-headless", "auto-approve", "edit-allow"}:
             if not results:
                 return chat_tool("read_file", {"path": "source.txt"}, "flow_read")
@@ -246,6 +276,14 @@ def main():
                 (workspace / "source.txt").write_text("before 🌱\n")
                 if scenario == "auto-sensitive-read":
                     (workspace / ".env").write_text("fixture-secret=synthetic-only\n")
+                if scenario.startswith("search-"):
+                    (workspace / "Sources").mkdir()
+                    (workspace / "Sources" / "Feature.swift").write_text('// fixture\nlet value = "needle 🌱"\n')
+                    for excluded in (".hidden", ".git", ".build", "node_modules"):
+                        (workspace / excluded).mkdir()
+                        (workspace / excluded / "Excluded.swift").write_text("needle 🌱 excluded\n")
+                    (workspace / "Sources" / "Link.swift").symlink_to(workspace / "Sources" / "Feature.swift")
+                    (workspace / ".env").write_text("fixture-secret=synthetic-only\n")
                 session = json_call("new", "--workspace", str(workspace), scenario, "--json")["id"]
                 request_id = str(uuid.uuid4())
                 mode = ("--permission", permission) if permission else ()
@@ -353,6 +391,32 @@ def main():
                     assert not (workspace / (scenario + ".txt")).exists() and not (workspace / "unexpected.txt").exists()
                     assert json_call("tools", run["id"], "--json")[0]["state"] == "denied"
                 check("denied reads disclose no content; automatic mode asks for sensitive paths and shell execution")
+
+                for scenario, mode in [("search-request", "requestApproval"), ("search-auto", "autoApprove"),
+                                       ("search-edits", "acceptEdits"), ("search-full", "fullAccess")]:
+                    run, workspace, _ = begin(scenario, chat_profile, mode)
+                    if mode in {"requestApproval", "autoApprove"}:
+                        for name, calls in [("find_files", 1), ("search_content", 2)]:
+                            item = pending(run, name)
+                            assert server.count(scenario) == calls
+                            assert "output" not in item and "blobID" not in item
+                            decide(item)
+                    if mode == "requestApproval":
+                        decide(pending(run, "read_file"))
+                    assert complete(run)["response"] == "Found the code and read the matching file."
+                    tools = json_call("tools", run["id"], "--json")
+                    assert [item["name"] for item in tools] == ["find_files", "search_content", "read_file"]
+                    assert all(item["state"] == "completed" for item in tools)
+                    assert server.count(scenario) == 4
+                check("find, content search and matching file read round-trip under all four permission modes")
+
+                run, _, _ = begin("search-denied", chat_profile, "autoApprove")
+                item = pending(run, "search_content")
+                assert "output" not in item and "blobID" not in item
+                decide(item, yes=False)
+                complete(run)
+                assert json_call("tools", run["id"], "--json")[0]["state"] == "denied"
+                check("automatic mode requires approval for recursive search; denial discloses no descendant content")
 
                 for old_mode in ("manual", "plan", "dontAsk"):
                     call("run", "--session", run["sessionID"], "--provider", chat_profile, "--permission", old_mode,

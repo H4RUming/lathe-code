@@ -1,4 +1,12 @@
 // Fixed execution and tool messages. Protocol fields and original output stay unchanged.
+"search.invalidArguments" = "검색에는 참/거짓 플래그와 0~1000의 정수 offset, 1~100의 정수 limit이 필요합니다.";
+"search.invalidGlob" = "nameGlob은 슬래시나 NUL 없이 UTF-8 1~128바이트여야 합니다. *와 ?만 와일드카드로 사용합니다.";
+"search.invalidQuery" = "검색어는 NUL 없이 한 줄의 UTF-8 1~256바이트여야 합니다.";
+"search.excludedRoot" = "생성 디렉터리 또는 숨김 파일 설정에서 제외된 검색 경로입니다. 다른 경로를 선택하거나 숨김 파일을 포함하세요.";
+"search.directoryChanged" = "준비 후 검색 디렉터리가 변경되었습니다. 검색 요청을 다시 준비하세요.";
+"search.metadataLimit" = "검색 메타데이터가 출력 한도를 초과했습니다. 더 짧은 디렉터리 경로나 검색어를 사용하세요.";
+"search.summary.files" = "%1$@ 아래에서 파일 이름이 %2$@에 맞는 파일 찾기";
+"search.summary.content" = "%1$@ 아래에서 파일 이름이 %2$@에 맞는 파일의 문자열 검색: %3$@";
 "runner.absolutePaths" = "실행 도우미와 기록 경로는 절대 파일 URL이어야 합니다.";
 "runner.eventMismatch" = "실행 도우미 이벤트 순서 또는 프로토콜이 일치하지 않습니다.";
 "runner.incompleteStream" = "실행 도우미 이벤트 스트림이 완전하지 않습니다.";

@@ -232,7 +232,9 @@ Claude와 Lathe 차등 검증은 사용자 동작·설정 계약을 비교하며
 ## 5. 다음 구현 단위
 
 Swift 앱의 runtime에 실제 Responses/Chat adapter와 도구 승인·파일·명령·blob·실행 기록을 연결했다.
-다음은 M1의 코드/웹 검색, patch·변경 미리보기, 실행 profile과 테스트 증거, 예산·모델 capability다.
+파일명 glob·일반 문자열 코드 검색도 같은 broker에 연결했다. LAT-TOOL-001은 일부 구현이며
+정규식·전체 ignore 규칙·symbol 검색은 남아 있다. 재귀 검색은 Auto에서도 승인하고 한도·제외 범위를 결과에 명시한다.
+다음은 M1의 코드 검색 확장·웹 검색, patch·변경 미리보기, 실행 profile과 테스트 증거, 예산·모델 capability다.
 LLDB launch/attach timeout은 별도 미완료 게이트로 남기며 debugger 제품 연결 전에 해결한다.
 sandbox probe 통과를 production 격리 완료로 확대하지 않는다.
 HTTP fixture와 원격 vLLM 한 구성의 왕복 검증을 다른 서비스·모델의 호환성이나 M1 전체 완료로 확대하지 않는다.

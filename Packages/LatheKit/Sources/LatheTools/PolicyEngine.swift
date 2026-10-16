@@ -17,6 +17,10 @@ public enum PolicyEngine {
     /// Unknown paths, configuration, credentials and executable files ask first.
     private static func isLowRisk(_ prepared: PreparedTool) -> Bool {
         switch prepared.operation {
+        case .search:
+            // Unknown descendants may contain credentials, executable files or
+            // configuration even beneath an otherwise ordinary source directory.
+            return false
         case .command(let request, _, _):
             // No shell expansion, flags, environment launcher or path aliases.
             // Other commands may execute configuration/hooks or touch the network.

@@ -1,4 +1,12 @@
 // Fixed execution and tool messages. Protocol fields and original output stay unchanged.
+"search.invalidArguments" = "Search requires boolean flags, an integer offset from 0 to 1000, and an integer limit from 1 to 100.";
+"search.invalidGlob" = "nameGlob must contain 1–128 UTF-8 bytes with no slash or NUL. Only * and ? are wildcards.";
+"search.invalidQuery" = "The search query must contain 1–256 UTF-8 bytes on one line, without NUL.";
+"search.excludedRoot" = "The search directory is excluded by the generated-directory or hidden-file settings. Choose another path or enable hidden files.";
+"search.directoryChanged" = "The search directory changed after preparation. Prepare the search again.";
+"search.metadataLimit" = "The search metadata exceeds the output limit. Choose a shorter directory path or query.";
+"search.summary.files" = "Find files under %1$@ matching basename %2$@";
+"search.summary.content" = "Search files under %1$@ matching basename %2$@ for literal text: %3$@";
 "runner.absolutePaths" = "Runner and journal paths must be absolute file URLs.";
 "runner.eventMismatch" = "Runner event sequence or protocol mismatch.";
 "runner.incompleteStream" = "Incomplete runner event stream.";

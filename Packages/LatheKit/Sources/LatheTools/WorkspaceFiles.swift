@@ -57,6 +57,26 @@ final class WorkspaceFiles {
         return FileIdentity(info)
     }
 
+    /// The search owns this descriptor until traversal finishes. Revalidate the
+    /// exact approved directory before enumerating any descendant names or bytes.
+    func openSearchDirectory(_ path: String, expected: FileIdentity) throws -> Int32 {
+        let fd = try directory(path)
+        var info = stat()
+        guard fstat(fd, &info) == 0 else {
+            let code = errno; close(fd)
+            throw ToolError.io(L10n.errorText("workspace.operation.workingDirectory", table: "ToolMessages"), code)
+        }
+        guard FileIdentity(info) == expected else {
+            close(fd)
+            throw ToolError.preconditionChanged(L10n.errorText("search.directoryChanged", table: "ToolMessages"))
+        }
+        return fd
+    }
+
+    func searchPathAllowed(_ path: String) -> Bool {
+        (try? validate(path)) != nil
+    }
+
     /// lstat-style validation does not open or read the target file. Approval
     /// preparation may inspect path/type/permissions, but never the body or SHA.
     func inspectFile(_ path: String, allowMissing: Bool = false) throws -> (isExecutable: Bool, exists: Bool) {

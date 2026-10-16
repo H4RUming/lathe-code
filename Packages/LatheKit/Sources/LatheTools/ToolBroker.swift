@@ -1,5 +1,6 @@
 import CoreFoundation
 import CryptoKit
+import Darwin
 import Foundation
 import LatheLocalization
 import LatheDomain
@@ -33,6 +34,7 @@ public struct PreparedTool: Sendable {
         case list(String), read(String)
         case write(path: String, content: Data, expectedSHA256: String)
         case command(CommandRequest, relativeDirectory: String, directoryIdentity: FileIdentity)
+        case search(SearchRequest, directoryIdentity: FileIdentity)
     }
 }
 
@@ -53,6 +55,8 @@ public enum ToolBroker {
     public static let definitions: [ToolDefinition] = [
         ToolDefinition(name: "list_directory", description: "List a workspace-relative directory. Symlinks cannot be followed; .git and engine data are protected.", parametersJSON: #"{"type":"object","properties":{"path":{"type":"string","description":"Relative directory; use . for the workspace root"}},"required":["path"],"additionalProperties":false}"#),
         ToolDefinition(name: "read_file", description: "Read a UTF-8 workspace file (up to 256 KiB). Returns sha256 required by write_file. Large content previews are truncated; use small files in this first implementation.", parametersJSON: #"{"type":"object","properties":{"path":{"type":"string"}},"required":["path"],"additionalProperties":false}"#),
+        ToolDefinition(name: "find_files", description: "Recursively discover regular workspace files. path is a relative directory or .; nameGlob matches basenames using only * and ? wildcards, with other characters literal. Hidden entries are skipped unless includeHidden is true. Generated directories, .git, symlinks, hard links and engine data are always excluded. No .gitignore parsing. Output reports exclusions, traversal budgets and truncation. offset/limit paginate deterministic traversal, not a frozen snapshot. Narrow path when a work budget is reached. Auto and Request approval modes always require approval before enumeration.", parametersJSON: #"{"type":"object","properties":{"path":{"type":"string"},"nameGlob":{"type":"string","minLength":1,"maxLength":128},"includeHidden":{"type":"boolean"},"offset":{"type":"integer","minimum":0,"maximum":1000},"limit":{"type":"integer","minimum":1,"maximum":100}},"required":["path","nameGlob","includeHidden","offset","limit"],"additionalProperties":false}"#),
+        ToolDefinition(name: "search_content", description: "Recursively search UTF-8 workspace files up to 256 KiB each for a nonempty single-line literal query (not regex; at most 256 UTF-8 bytes). Returns one result per matching line with workspace path, 1-based line number, bounded snippet and file SHA-256. nameGlob matches basenames using * and ?; path narrows the directory. Hidden entries require includeHidden. Generated directories, .git, links, binary files and engine data are excluded; .gitignore is not parsed. Respect skipped/truncated metadata and narrow path after a work budget. offset pages are not a snapshot. Auto and Request approval always require approval before reading.", parametersJSON: #"{"type":"object","properties":{"path":{"type":"string"},"nameGlob":{"type":"string","minLength":1,"maxLength":128},"includeHidden":{"type":"boolean"},"offset":{"type":"integer","minimum":0,"maximum":1000},"limit":{"type":"integer","minimum":1,"maximum":100},"query":{"type":"string","minLength":1,"maxLength":256},"caseSensitive":{"type":"boolean"}},"required":["path","nameGlob","includeHidden","offset","limit","query","caseSensitive"],"additionalProperties":false}"#),
         ToolDefinition(name: "write_file", description: "Atomically write UTF-8 content (the complete arguments JSON must fit 32 KiB). expectedSHA256 must match the previous read, or be missing to create a new file. Existing directories must already exist. Requires edit permission.", parametersJSON: #"{"type":"object","properties":{"path":{"type":"string"},"content":{"type":"string"},"expectedSHA256":{"type":"string","description":"64 lowercase hex digits from read_file, or missing for a new file"}},"required":["path","content","expectedSHA256"],"additionalProperties":false}"#),
         ToolDefinition(name: "run_command", description: "Run an UNSANDBOXED local command subject to the user's permission mode. executable is an absolute path; arguments are passed literally. workingDirectory is workspace-relative. Only a fixed system PATH and locale are supplied; no API credentials or parent environment. Input is closed; use noninteractive commands. Output is bounded to 128 KiB and timeout to 120 seconds.", parametersJSON: #"{"type":"object","properties":{"executable":{"type":"string"},"arguments":{"type":"array","items":{"type":"string"}},"workingDirectory":{"type":"string"},"timeoutSeconds":{"type":"number","minimum":0.1,"maximum":120}},"required":["executable","arguments","workingDirectory","timeoutSeconds"],"additionalProperties":false}"#),
     ]
@@ -68,6 +72,7 @@ public enum ToolBroker {
         let access = try WorkspaceFiles(root: root, protectedPaths: protected)
         let operation: PreparedTool.Operation, effect: ToolEffect, summary: String
         var executableFile = false
+        var searchIdentity = ""
         func string(_ key: String) throws -> String {
             guard let value = object[key] as? String, !value.utf8.contains(0) else { throw ToolError.invalid(L10n.errorFormat("tool.stringArgument", table: "ToolMessages", key)) }
             return value
@@ -86,6 +91,19 @@ public enum ToolBroker {
             let path = try access.validate(try string("path"))
             executableFile = try access.inspectFile(path).isExecutable
             operation = .read(path); effect = .read; summary = L10n.format("tool.summary.read", table: "ToolMessages", path)
+        case "find_files", "search_content":
+            let content = call.name == "search_content"
+            var expected: Set<String> = ["path", "nameGlob", "includeHidden", "offset", "limit"]
+            if content { expected.formUnion(["query", "caseSensitive"]) }
+            try keys(expected)
+            let request = try SearchRequest(object: object, content: content)
+            _ = try access.validate(request.path, allowRoot: true)
+            let identity = try access.directoryIdentity(request.path)
+            operation = .search(request, directoryIdentity: identity); effect = .read
+            searchIdentity = "\0search-directory:" + identity.description
+            summary = content
+                ? L10n.format("search.summary.content", table: "ToolMessages", request.path, request.nameGlob, request.query!)
+                : L10n.format("search.summary.files", table: "ToolMessages", request.path, request.nameGlob)
         case "write_file":
             try keys(["path", "content", "expectedSHA256"])
             let path = try access.validate(try string("path")), expected = try string("expectedSHA256")
@@ -127,7 +145,7 @@ public enum ToolBroker {
         let canonical = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys, .withoutEscapingSlashes])
         guard canonical.count <= 32_768 else { throw ToolError.invalid(L10n.errorText("tool.canonicalLimit", table: "ToolMessages")) }
         let arguments = String(decoding: canonical, as: UTF8.self)
-        let fingerprint = [call.name, root.path, access.identity.description, arguments, protected.map(\.path).sorted().joined(separator: "\n")].joined(separator: "\0")
+        let fingerprint = [call.name, root.path, access.identity.description, arguments, protected.map(\.path).sorted().joined(separator: "\n")].joined(separator: "\0") + searchIdentity
         let displayedSummary = summary.utf8.count > 900
             ? L10n.format("tool.summary.truncated", table: "ToolMessages", String(decoding: Data(summary.utf8).prefix(900), as: UTF8.self))
             : summary
@@ -151,6 +169,10 @@ public enum ToolBroker {
         let access = try WorkspaceFiles(root: prepared.workspace, protectedPaths: prepared.protectedPaths)
         guard access.identity == prepared.rootIdentity else { throw ToolError.preconditionChanged(L10n.errorText("tool.workspaceChanged", table: "ToolMessages")) }
         switch prepared.operation {
+        case .search(let request, let identity):
+            let directory = try access.openSearchDirectory(request.path, expected: identity)
+            defer { close(directory) }
+            return try await WorkspaceSearch.execute(request, access: access, directory: directory)
         case .list(let path):
             return try jsonResult(["path": path, "entries": access.list(path)])
         case .read(let path):

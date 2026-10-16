@@ -49,12 +49,17 @@ Chat 서버가 반환하는 `reasoning` 및 이전 형식 `reasoning_content`는
 `settings.json`, `scripts/setup.sh`는 승인 대상이다. 이 규칙은 모든 코드의 위험을 증명하거나
 자유형 AI reviewer의 판단을 제공하지 않는다.
 
-현재 제공하는 도구는 네 개다.
+재귀 검색은 하위 파일을 미리 분류할 수 없으므로 `autoApprove`에서도 매번 승인한다.
+`fullAccess`와 `acceptEdits`에서는 읽기 도구로 자동 실행하고, `requestApproval`에서는 승인한다.
+
+현재 제공하는 도구는 여섯 개다.
 
 | 도구 | 계약 |
 | --- | --- |
 | `list_directory` | workspace 상대 경로, 최대 2,000 entries. `.`은 root다. |
 | `read_file` | 256 KiB 이하 UTF-8 파일. SHA-256과 bounded JSON 미리보기, 전체 원본 blob을 저장한다. |
+| `find_files` | workspace 상대 폴더를 재귀 탐색하고 파일 이름 glob에 맞는 경로를 페이지로 반환한다. |
+| `search_content` | 같은 범위의 UTF-8 파일에서 한 줄짜리 문자열을 찾아 경로·행·본문 일부·파일 SHA-256을 반환한다. |
 | `write_file` | 이전 SHA-256 또는 생성용 `missing` 필수. 전체 인자 JSON 32 KiB 안에서 파일 전체를 atomic replace/create한다. 상위 폴더는 이미 있어야 한다. |
 | `run_command` | 절대 실행 파일·문자열 argv·workspace 상대 cwd·0.1~120초 timeout. 입력을 닫는 비대화형 실행, stdout/stderr 합계 128 KiB 한도. |
 
@@ -70,6 +75,42 @@ write lease로 보호한다.
 표시한다. 파일 도구의 경로 제한이 shell에 적용되는 것은 아니다. 환경은 고정 system `PATH`와 `LANG`만
 명시하고 부모 API 키를 상속하지 않는다. 개발 도구별 환경 profile, 사용자 PATH 선택, 대화형 터미널은 후속이다.
 낮은 수준의 runner는 PTY를 지원하지만 현재 모델 도구와 앱에는 PTY 화면·입력 세션이 연결되어 있지 않다.
+
+## 프로젝트 코드 검색
+
+모델은 `find_files`로 후보 경로를 찾고, `search_content`로 해당 코드 위치를 찾은 뒤
+`read_file`로 파일을 읽을 수 있다. 별도 검색 서버나 `rg` 설치 없이 앱 내부 Swift 코드로 수행한다.
+프로젝트 선택만으로 검색하지 않으며 매 도구 호출에 현재 실행의 권한을 적용한다.
+
+두 검색 도구의 필수 입력은 `path`, `nameGlob`, `includeHidden`, `offset`, `limit`이다.
+`path`는 workspace 상대 폴더이며 `.`은 root다. `nameGlob`은 **파일 이름**에만 적용하는
+`*`·`?` 패턴(예: `*.swift`)으로, 경로 glob과 정규식은 지원하지 않는다.
+`offset`은 건너뛸 결과 수(0~1,000), `limit`은 한 페이지 결과 수(1~100)다.
+`search_content`는 `query`와 `caseSensitive`도 받는다. query는 UTF-8 1~256 bytes의
+줄바꿈 없는 **일반 문자열**이며 정규식이 아니다. 일치하는 줄마다 결과 하나를 반환한다.
+
+숨김 항목은 `includeHidden: false`일 때 제외한다. `.git`, 앱 데이터 영역, symlink·hardlink·특수 파일은
+검색 결과에서 제외하고, `.build`, `node_modules`, `vendor`, `.venv`, `venv`, `build`, `dist`, `target` 폴더도
+항상 제외한다. 현재 `.gitignore`는 해석하지 않으며 결과의 `exclusions.gitignoreApplied`에 `false`로 명시한다.
+내용 검색은 256 KiB 이하의 UTF-8 일반 파일만 읽고 NUL을 포함하거나 해석할 수 없는 파일은 건너뛴다.
+다른 ignore 규칙·정규식·symbol/LSP 검색은 LAT-TOOL-001의 남은 범위다.
+
+결과는 정렬된 깊이 우선 탐색 순서다. `matches`에 상대 경로를 담고 내용 검색은 1부터 시작하는 `line`,
+최대 512 bytes의 `text`, `snippetTruncated`, 읽은 전체 파일의 `sha256`도 담는다.
+파일명 검색은 본문을 읽지 않는다. 한 호출의 작업량은 10,000 entries, 읽기 2,000개·총 8 MiB,
+깊이 32로 제한하고 작업 사이에 5초 경과를 확인한다. OS의 파일 I/O 자체를 강제로 중단하는 deadline은 아니다.
+JSON 전체는 48 KiB를 넘지 않는다.
+`stats`, `skipped`, `exclusions`, `limits`, `truncated`, `stopReason`으로 수행 범위와 제외 이유를 표시한다.
+`skipped`는 제외된 항목 수이며 건너뛴 폴더 아래의 모든 파일을 센 값은 아니다.
+`matchesSeen`은 실제 발견한 수이며 저장소 전체의 정확한 결과 수를 뜻하지 않는다.
+결과/출력 한도로 잘리면 `nextOffset`으로 다음 페이지를 요청할 수 있다. 작업량 한도에 도달하면
+`nextOffset`은 `null`이며 경로나 패턴을 좁혀야 한다. 다음 offset이 1,000을 넘는 경우도
+`offsetLimit`과 `nextOffset: null`로 표시한다. 페이지 간 파일 변경을 고정하는 snapshot 기능은 없다.
+
+준비 단계는 검색 root의 경로·메타데이터만 검사하며, 승인 전에 하위 폴더를 열람하거나 내용을 읽지 않는다.
+실행 시 root identity를 재검사하고 no-follow directory descriptor로 탐색한다. 검색은 취소 가능하며,
+도구 결과는 기존 실행 기록·blob·모델 전달 경로를 사용한다. 외부 모델을 선택한 경우 검색 결과도
+해당 모델에 전달되는 대화의 일부다.
 
 ## 개발 client
 
@@ -135,6 +176,9 @@ helper SIGKILL 뒤 불명확한 효과는 [runner 계약](runner.md)을 따른�
 redirect 거절을 포함한다. 네 권한 모드 변경 후에는 localhost fixture 11개 검사가 통과했다.
 읽기 승인·거절 시 본문 비노출, 승인 전 baseline 비저장, 전체 권한 자동 실행, 편집 허용의 명령 승인,
 자동 승인의 일반 파일·정확한 pwd 허용과 민감 경로·shell 승인, CLI 기본값·구모드 거절을 포함한다.
+코드 검색 추가 후에는 코어 119개·앱 상태 23개와 HTTP fixture 13개 검사가 통과했다.
+네 모드의 파일명 검색 → 내용 검색 → 일치 파일 읽기 왕복, Auto 재귀 검색 승인·거절 시 비노출,
+UTF-8·페이지·작업량 한도·root 교체·링크 차단을 포함한다. 이 검색 검증은 실제 외부 모델을 사용하지 않았다.
 네이티브 앱에서도 연결 저장, 프로젝트 열기, fixture의 파일 수정·명령 실행 일회성 승인과 최종 응답을 확인했다.
 이 화면 검증은 격리된 테스트 데이터와 인증 없는 localhost 서버를 사용했다.
 명령과 실행 범위는 [개발 가이드](development.md#검증과-한계)를 따른다.
@@ -143,7 +187,7 @@ redirect 거절을 포함한다. 네 권한 모드 변경 후에는 localhost fi
 명령 stdout·stderr·exit code와 도구 완료 상태를 확인했다. [실제 서버 검사 범위](probes/provider.md)를 따른다.
 **OpenAI 계정·Ollama 및 다른 서버·모델 구성은 미검증이다.** 한 구성의 성공을 전체 호환성으로 확대하지 않는다.
 
-다음 M1 작업은 코드 검색·웹 검색/본문 읽기, patch/move/delete와 변경 미리보기, 실행 profile·테스트 증거,
+다음 M1 작업은 코드 검색의 정규식·ignore 확장, 웹 검색/본문 읽기, patch/move/delete와 변경 미리보기, 실행 profile·테스트 증거,
 실행 예산과 모델 capability·Off/On 제어다. Google AI Studio·Vertex·Claude 전용 API와 Ollama native API,
 MCP·Skills·Hooks·Ultra, 편집기와 디버거는 별도 후속 단계다. sandbox probe는 production 격리가 아니며
 LLDB 실제 launch/attach timeout 게이트는 여전히 미완료다.
