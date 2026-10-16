@@ -96,10 +96,31 @@ struct ExecutionTests {
         let result = try await ProcessRunner().run(CommandRequest(executable: "/bin/sh", arguments: ["-c", script],
             workingDirectory: fixture.directory.path, timeoutSeconds: 0.1, terminationGraceSeconds: 0.03), onEvent: capture.record)
         #expect(result.reason == .timedOut)
-        #expect(result.terminationSignal == SIGKILL)
+        // The deadline includes process startup. A loaded host may time out before
+        // the shell installs its trap; either termination signal is then correct.
+        #expect(result.terminationSignal == SIGTERM || result.terminationSignal == SIGKILL)
         #expect(result.durationSeconds < 2)
         try await Task.sleep(for: .milliseconds(650))
         #expect(!FileManager.default.fileExists(atPath: marker.path))
+    }
+
+    @Test func cancellationEscalatesAfterShellAndDescendantIgnoreTerm() async throws {
+        let fixture = try CommandFixture(); defer { fixture.cleanUp() }
+        let runner = ProcessRunner(), capture = CommandCapture()
+        // Readiness comes from the descendant after both TERM traps are installed.
+        // Cancellation must therefore escalate, regardless of process startup time.
+        let script = "trap '' TERM; (trap '' TERM; printf READY; /bin/sleep 0.6; /usr/bin/touch survived) & wait"
+        let result = try await runner.run(CommandRequest(executable: "/bin/sh", arguments: ["-c", script],
+            workingDirectory: fixture.directory.path, timeoutSeconds: 5, terminationGraceSeconds: 0.03)) { event in
+                capture.record(event)
+                if case .output = event, capture.text(.stdout).contains("READY") { runner.cancel() }
+            }
+        #expect(capture.text(.stdout).contains("READY"))
+        #expect(result.reason == .cancelled)
+        #expect(result.terminationSignal == SIGKILL)
+        #expect(result.durationSeconds < 2)
+        try await Task.sleep(for: .milliseconds(650))
+        #expect(!FileManager.default.fileExists(atPath: fixture.directory.appendingPathComponent("survived").path))
     }
 
     @Test func leaderExitStillCleansUpGrandchildrenHoldingOutputPipes() async throws {
