@@ -52,7 +52,7 @@ Chat 서버가 반환하는 `reasoning` 및 이전 형식 `reasoning_content`는
 재귀 검색은 하위 파일을 미리 분류할 수 없으므로 `autoApprove`에서도 매번 승인한다.
 `fullAccess`와 `acceptEdits`에서는 읽기 도구로 자동 실행하고, `requestApproval`에서는 승인한다.
 
-현재 제공하는 도구는 여섯 개다.
+현재 제공하는 도구는 일곱 개다.
 
 | 도구 | 계약 |
 | --- | --- |
@@ -61,6 +61,7 @@ Chat 서버가 반환하는 `reasoning` 및 이전 형식 `reasoning_content`는
 | `find_files` | workspace 상대 폴더를 재귀 탐색하고 파일 이름 glob에 맞는 경로를 페이지로 반환한다. |
 | `search_content` | 같은 범위의 UTF-8 파일에서 한 줄짜리 문자열을 찾아 경로·행·본문 일부·파일 SHA-256을 반환한다. |
 | `write_file` | 이전 SHA-256 또는 생성용 `missing` 필수. 전체 인자 JSON 32 KiB 안에서 파일 전체를 atomic replace/create한다. 상위 폴더는 이미 있어야 한다. |
+| `edit_file` | 기존 파일의 SHA-256과 `oldText`/`newText`를 받아 정확히 한 곳을 치환한다. 일치 없음·복수 일치·변경된 파일은 거절한다. |
 | `run_command` | 절대 실행 파일·문자열 argv·workspace 상대 cwd·0.1~120초 timeout. 입력을 닫는 비대화형 실행, stdout/stderr 합계 128 KiB 한도. |
 
 파일 도구는 경로 traversal, symlink, hardlink, `.git`, 엔진 데이터 접근을 거절한다. 열린 directory FD를
@@ -75,6 +76,36 @@ write lease로 보호한다.
 표시한다. 파일 도구의 경로 제한이 shell에 적용되는 것은 아니다. 환경은 고정 system `PATH`와 `LANG`만
 명시하고 부모 API 키를 상속하지 않는다. 개발 도구별 환경 profile, 사용자 PATH 선택, 대화형 터미널은 후속이다.
 낮은 수준의 runner는 PTY를 지원하지만 현재 모델 도구와 앱에는 PTY 화면·입력 세션이 연결되어 있지 않다.
+
+## 정확한 부분 편집과 제안 미리보기
+
+`edit_file`의 필수 인자는 `path`, `oldText`, `newText`, `expectedSHA256`이며 다른 인자는 받지 않는다.
+`path`는 기존 workspace 파일이다. `expectedSHA256`은 `read_file` 또는 내용 검색에서 얻은
+64자리 소문자 SHA-256이어야 하며 새 파일 생성용 `missing`은 허용하지 않는다.
+`oldText`는 비어 있으면 안 되고 `newText`는 빈 문자열일 수 있다(해당 내용 삭제).
+둘의 UTF-8 bytes가 같으면 변경 없는 요청으로 거절한다. 모델이 정확한 위치를 지정하도록
+앞뒤 문맥을 `oldText`에 포함할 수 있지만, 줄 번호나 모호한 유사 문자열로 보정하지 않는다.
+
+치환은 **UTF-8 bytes의 정확한 일치**로 수행한다. Unicode 정규화·줄바꿈 변환·공백 정리를 하지 않는다.
+일치가 없거나 겹치는 위치까지 포함해 두 곳 이상이면 파일을 바꾸지 않는다.
+전체 인자 JSON은 32 KiB, 기존 파일과 수정 후 파일은 각각 256 KiB 이하이고,
+NUL을 포함한 파일과 UTF-8로 해석할 수 없는 파일은 거절한다.
+실행 결과는 변경 전후 SHA-256, 적용 여부, 치환 수와 수정 후 byte 수를 담는다.
+
+파일 쓰기와 같은 네 권한 모드·민감 경로/실행 파일 분류·workspace write lease를 사용한다.
+준비 단계는 메타데이터만 검사하며, 승인 후 원본을 읽어 SHA를 확인하고 변경 전 blob을 저장한다.
+실행 시 다시 같은 SHA와 단일 일치를 검사하고 기존 atomic write 경로에서 적용 직전 SHA를 재확인한다.
+승인 대기 중 외부 편집, 거절, 취소와 불명확한 치환은 자동 덮어쓰기나 재실행으로 처리하지 않는다.
+
+앱 도구 카드에는 모델 인자에서 얻은 **제거할 텍스트·추가할 텍스트 제안**을 표시한다.
+승인 전 미리보기는 디스크를 새로 읽은 결과나 검증된 현재 파일이라고 표시하지 않는다.
+내용과 SHA 검증은 승인 후 적용 직전에 수행한다. 성공 상태가 저장되면 적용 완료로 표시하고,
+실패·거절·취소·결과 불명확 상태를 적용 성공과 구분한다.
+긴 제안은 표시 한도와 생략 안내를 제공하고 원본 JSON도 열 수 있다.
+공백·탭·줄바꿈의 가시화는 화면 표시만 바꾸며 실제 편집 인자를 바꾸지 않는다.
+
+이 기능은 LAT-TOOL-003의 단일 파일 정확한 치환과 기본 제안 미리보기 부분이다.
+unified patch, 다중 파일 변경 계획, rename/move/delete, 실제 전체 파일 diff·hunk 선택·undo 화면은 후속이다.
 
 ## 프로젝트 코드 검색
 
@@ -179,6 +210,9 @@ redirect 거절을 포함한다. 네 권한 모드 변경 후에는 localhost fi
 코드 검색 추가 후에는 코어 119개·앱 상태 23개와 HTTP fixture 13개 검사가 통과했다.
 네 모드의 파일명 검색 → 내용 검색 → 일치 파일 읽기 왕복, Auto 재귀 검색 승인·거절 시 비노출,
 UTF-8·페이지·작업량 한도·root 교체·링크 차단을 포함한다. 이 검색 검증은 실제 외부 모델을 사용하지 않았다.
+부분 편집 추가 후에는 코어 130개·앱 상태 30개와 HTTP fixture 15개 검사가 통과했다.
+읽기 → 정확한 부분 치환 → 재확인의 네 모드 왕복, 잘못된 승인 hash, 거절·취소·외부 변경·모호한 치환 시
+원본 보존과 미리보기의 상태·표시 한도를 확인했다. 부분 편집도 외부 모델 실검증과 구분한다.
 네이티브 앱에서도 연결 저장, 프로젝트 열기, fixture의 파일 수정·명령 실행 일회성 승인과 최종 응답을 확인했다.
 이 화면 검증은 격리된 테스트 데이터와 인증 없는 localhost 서버를 사용했다.
 명령과 실행 범위는 [개발 가이드](development.md#검증과-한계)를 따른다.
@@ -187,7 +221,7 @@ UTF-8·페이지·작업량 한도·root 교체·링크 차단을 포함한다. 
 명령 stdout·stderr·exit code와 도구 완료 상태를 확인했다. [실제 서버 검사 범위](probes/provider.md)를 따른다.
 **OpenAI 계정·Ollama 및 다른 서버·모델 구성은 미검증이다.** 한 구성의 성공을 전체 호환성으로 확대하지 않는다.
 
-다음 M1 작업은 코드 검색의 정규식·ignore 확장, 웹 검색/본문 읽기, patch/move/delete와 변경 미리보기, 실행 profile·테스트 증거,
+다음 M1 작업은 코드 검색의 정규식·ignore 확장, 웹 검색/본문 읽기, patch/move/delete와 전체 diff, 실행 profile·테스트 증거,
 실행 예산과 모델 capability·Off/On 제어다. Google AI Studio·Vertex·Claude 전용 API와 Ollama native API,
 MCP·Skills·Hooks·Ultra, 편집기와 디버거는 별도 후속 단계다. sandbox probe는 production 격리가 아니며
 LLDB 실제 launch/attach timeout 게이트는 여전히 미완료다.

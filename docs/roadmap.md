@@ -77,11 +77,12 @@ idle 창 닫기/종료는 프로세스·socket을 정리하고, 작업 중에는
 
 **구현된 첫 묶음:** Responses/Chat 스트리밍 adapter, 네이티브 연결 설정과 endpoint에 묶인 Keychain 키,
 앱 runtime과 개발 client의 공통 loop, Full access/Auto approve/Accept edits/Request approval, 정확한 요청 hash에 대한 일회 승인,
-list/read/write/run_command, SHA precondition과 변경 전/결과 blob, 비대화형 native runner,
+list/read/write/edit/run_command, 제한된 파일명·내용 검색, 부분 편집 제안 미리보기,
+SHA precondition과 변경 전/결과 blob, 비대화형 native runner,
 취소·불명확한 실행 복구·자동 replay 금지. 최대 단계·호출 수 등 기본 한도를 적용한다.
 기본 앱은 mock이며 저장된 연결을 선택해야 실제 도구가 동작한다.
 원격 vLLM 한 구성의 합성 파일·명령 왕복은 별도 live probe로 통과했다. 실제 OpenAI와 더 넓은 모델 구성,
-실패 테스트 조사·수정 게이트, 코드·웹 검색, 풍부한 편집·diff, 실행 profile과 테스트 증거,
+실패 테스트 조사·수정 게이트, 코드 검색의 정규식·ignore 확장과 웹 검색, 다중 파일 patch·전체 diff, 실행 profile과 테스트 증거,
 token/비용 budget·steering·Off/On capability는 남았다. 아래 목록과 게이트 전체를 완료한 것은 아니다.
 
 - 연결 설정·Keychain·환경 profile·URL prefix와 원격 인증.
@@ -234,7 +235,9 @@ Claude와 Lathe 차등 검증은 사용자 동작·설정 계약을 비교하며
 Swift 앱의 runtime에 실제 Responses/Chat adapter와 도구 승인·파일·명령·blob·실행 기록을 연결했다.
 파일명 glob·일반 문자열 코드 검색도 같은 broker에 연결했다. LAT-TOOL-001은 일부 구현이며
 정규식·전체 ignore 규칙·symbol 검색은 남아 있다. 재귀 검색은 Auto에서도 승인하고 한도·제외 범위를 결과에 명시한다.
-다음은 M1의 코드 검색 확장·웹 검색, patch·변경 미리보기, 실행 profile과 테스트 증거, 예산·모델 capability다.
+SHA에 고정한 단일 파일 부분 치환과 모델 제안 미리보기도 연결했다. 실제 파일 내용은 승인 후 검증하며
+LAT-TOOL-003의 다중 파일 patch/move/delete와 전체 diff·되돌리기는 남아 있다.
+다음은 M1의 코드 검색 확장·웹 검색, patch·전체 diff, 실행 profile과 테스트 증거, 예산·모델 capability다.
 LLDB launch/attach timeout은 별도 미완료 게이트로 남기며 debugger 제품 연결 전에 해결한다.
 sandbox probe 통과를 production 격리 완료로 확대하지 않는다.
 HTTP fixture와 원격 vLLM 한 구성의 왕복 검증을 다른 서비스·모델의 호환성이나 M1 전체 완료로 확대하지 않는다.

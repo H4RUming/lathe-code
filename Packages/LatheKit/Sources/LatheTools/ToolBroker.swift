@@ -33,6 +33,7 @@ public struct PreparedTool: Sendable {
     enum Operation: Sendable {
         case list(String), read(String)
         case write(path: String, content: Data, expectedSHA256: String)
+        case edit(FileEditArguments)
         case command(CommandRequest, relativeDirectory: String, directoryIdentity: FileIdentity)
         case search(SearchRequest, directoryIdentity: FileIdentity)
     }
@@ -54,10 +55,11 @@ public enum ToolBroker {
     static let commandOutputLimit = 131_072
     public static let definitions: [ToolDefinition] = [
         ToolDefinition(name: "list_directory", description: "List a workspace-relative directory. Symlinks cannot be followed; .git and engine data are protected.", parametersJSON: #"{"type":"object","properties":{"path":{"type":"string","description":"Relative directory; use . for the workspace root"}},"required":["path"],"additionalProperties":false}"#),
-        ToolDefinition(name: "read_file", description: "Read a UTF-8 workspace file (up to 256 KiB). Returns sha256 required by write_file. Large content previews are truncated; use small files in this first implementation.", parametersJSON: #"{"type":"object","properties":{"path":{"type":"string"}},"required":["path"],"additionalProperties":false}"#),
+        ToolDefinition(name: "read_file", description: "Read a UTF-8 workspace file (up to 256 KiB). Returns sha256 required by write_file and edit_file. Large content previews are truncated; use small files in this first implementation.", parametersJSON: #"{"type":"object","properties":{"path":{"type":"string"}},"required":["path"],"additionalProperties":false}"#),
         ToolDefinition(name: "find_files", description: "Recursively discover regular workspace files. path is a relative directory or .; nameGlob matches basenames using only * and ? wildcards, with other characters literal. Hidden entries are skipped unless includeHidden is true. Generated directories, .git, symlinks, hard links and engine data are always excluded. No .gitignore parsing. Output reports exclusions, traversal budgets and truncation. offset/limit paginate deterministic traversal, not a frozen snapshot. Narrow path when a work budget is reached. Auto and Request approval modes always require approval before enumeration.", parametersJSON: #"{"type":"object","properties":{"path":{"type":"string"},"nameGlob":{"type":"string","minLength":1,"maxLength":128},"includeHidden":{"type":"boolean"},"offset":{"type":"integer","minimum":0,"maximum":1000},"limit":{"type":"integer","minimum":1,"maximum":100}},"required":["path","nameGlob","includeHidden","offset","limit"],"additionalProperties":false}"#),
         ToolDefinition(name: "search_content", description: "Recursively search UTF-8 workspace files up to 256 KiB each for a nonempty single-line literal query (not regex; at most 256 UTF-8 bytes). Returns one result per matching line with workspace path, 1-based line number, bounded snippet and file SHA-256. nameGlob matches basenames using * and ?; path narrows the directory. Hidden entries require includeHidden. Generated directories, .git, links, binary files and engine data are excluded; .gitignore is not parsed. Respect skipped/truncated metadata and narrow path after a work budget. offset pages are not a snapshot. Auto and Request approval always require approval before reading.", parametersJSON: #"{"type":"object","properties":{"path":{"type":"string"},"nameGlob":{"type":"string","minLength":1,"maxLength":128},"includeHidden":{"type":"boolean"},"offset":{"type":"integer","minimum":0,"maximum":1000},"limit":{"type":"integer","minimum":1,"maximum":100},"query":{"type":"string","minLength":1,"maxLength":256},"caseSensitive":{"type":"boolean"}},"required":["path","nameGlob","includeHidden","offset","limit","query","caseSensitive"],"additionalProperties":false}"#),
         ToolDefinition(name: "write_file", description: "Atomically write UTF-8 content (the complete arguments JSON must fit 32 KiB). expectedSHA256 must match the previous read, or be missing to create a new file. Existing directories must already exist. Requires edit permission.", parametersJSON: #"{"type":"object","properties":{"path":{"type":"string"},"content":{"type":"string"},"expectedSHA256":{"type":"string","description":"64 lowercase hex digits from read_file, or missing for a new file"}},"required":["path","content","expectedSHA256"],"additionalProperties":false}"#),
+        ToolDefinition(name: "edit_file", description: "Atomically replace exactly one occurrence of oldText in an existing UTF-8 file. Matching is byte-exact, including Unicode normalization and line endings. oldText must be nonempty and differ from newText; newText may be empty. Zero or multiple matches, including overlapping matches, are rejected. expectedSHA256 must be the current lowercase SHA-256 from read_file or search_content, never missing. Arguments JSON must fit 32 KiB; the original and edited files must each fit 256 KiB. NUL/binary files, links, .git and engine data are blocked. Requires edit permission.", parametersJSON: #"{"type":"object","properties":{"path":{"type":"string"},"oldText":{"type":"string","minLength":1},"newText":{"type":"string"},"expectedSHA256":{"type":"string","pattern":"^[0-9a-f]{64}$"}},"required":["path","oldText","newText","expectedSHA256"],"additionalProperties":false}"#),
         ToolDefinition(name: "run_command", description: "Run an UNSANDBOXED local command subject to the user's permission mode. executable is an absolute path; arguments are passed literally. workingDirectory is workspace-relative. Only a fixed system PATH and locale are supplied; no API credentials or parent environment. Input is closed; use noninteractive commands. Output is bounded to 128 KiB and timeout to 120 seconds.", parametersJSON: #"{"type":"object","properties":{"executable":{"type":"string"},"arguments":{"type":"array","items":{"type":"string"}},"workingDirectory":{"type":"string"},"timeoutSeconds":{"type":"number","minimum":0.1,"maximum":120}},"required":["executable","arguments","workingDirectory","timeoutSeconds"],"additionalProperties":false}"#),
     ]
 
@@ -118,6 +120,15 @@ public enum ToolBroker {
             summary = expected == "missing"
                 ? L10n.format("tool.summary.create", table: "ToolMessages", path, Int64(content.count), expected)
                 : L10n.format("tool.summary.replace", table: "ToolMessages", path, Int64(content.count), expected)
+        case "edit_file":
+            try keys(["path", "oldText", "newText", "expectedSHA256"])
+            let arguments = FileEditArguments(path: try access.validate(try string("path")),
+                oldText: try string("oldText"), newText: try string("newText"), expectedSHA256: try string("expectedSHA256"))
+            try FileEdit.validateArguments(arguments)
+            executableFile = try access.inspectFile(arguments.path).isExecutable
+            operation = .edit(arguments); effect = .write
+            summary = L10n.format("tool.summary.edit", table: "ToolMessages", arguments.path,
+                Int64(arguments.oldText.utf8.count), Int64(arguments.newText.utf8.count), arguments.expectedSHA256)
         case "run_command":
             try keys(["executable", "arguments", "workingDirectory", "timeoutSeconds"])
             let executable = try string("executable")
@@ -158,10 +169,18 @@ public enum ToolBroker {
     /// execute() checks the same SHA again immediately before publishing the write.
     public static func captureBeforeContent(_ prepared: PreparedTool) throws -> Data? {
         try Task.checkCancellation()
-        guard case .write(let path, _, let expected) = prepared.operation else { return nil }
+        guard prepared.effect == .write else { return nil }
         let access = try WorkspaceFiles(root: prepared.workspace, protectedPaths: prepared.protectedPaths)
         guard access.identity == prepared.rootIdentity else { throw ToolError.preconditionChanged(L10n.errorText("tool.workspaceChanged", table: "ToolMessages")) }
-        return try access.checkPrecondition(path, expected: expected)
+        switch prepared.operation {
+        case .write(let path, _, let expected):
+            return try access.checkPrecondition(path, expected: expected)
+        case .edit(let arguments):
+            let before = try editBaseline(arguments, access: access)
+            _ = try FileEdit.replacing(in: before, arguments: arguments)
+            return before
+        default: return nil
+        }
     }
 
     public static func execute(_ prepared: PreparedTool, runnerURL: URL, journalRoot: URL) async throws -> ToolResult {
@@ -191,12 +210,25 @@ public enum ToolBroker {
         case .write(let path, let content, let expected):
             try access.write(path, content: content, expected: expected)
             return try jsonResult(["path": path, "sha256": digest(content), "bytes": content.count, "written": true])
+        case .edit(let arguments):
+            let before = try editBaseline(arguments, access: access)
+            let content = try FileEdit.replacing(in: before, arguments: arguments)
+            try access.write(arguments.path, content: content, expected: arguments.expectedSHA256)
+            return try jsonResult(["path": arguments.path, "written": true, "sha256": digest(content),
+                "beforeSHA256": arguments.expectedSHA256, "replacements": 1, "bytes": content.count])
         case .command(let command, let relative, let identity):
             guard try access.directoryIdentity(relative) == identity else {
                 throw ToolError.preconditionChanged(L10n.errorText("tool.directoryChanged", table: "ToolMessages"))
             }
             return try await RunnerBridge.execute(command, runnerURL: runnerURL, journalRoot: journalRoot)
         }
+    }
+
+    private static func editBaseline(_ arguments: FileEditArguments, access: WorkspaceFiles) throws -> Data {
+        guard let content = try access.checkPrecondition(arguments.path, expected: arguments.expectedSHA256) else {
+            throw ToolError.preconditionChanged(L10n.errorText("edit.expectedDigest", table: "ToolMessages"))
+        }
+        return content
     }
 
     static func digest(_ data: Data) -> String { SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined() }

@@ -29,6 +29,8 @@ public enum PolicyEngine {
             return ordinaryPath(path, directory: true)
         case .read(let path), .write(let path, _, _):
             return !prepared.executableFile && ordinaryPath(path, directory: false)
+        case .edit(let arguments):
+            return !prepared.executableFile && ordinaryPath(arguments.path, directory: false)
         }
     }
 

@@ -74,5 +74,13 @@
 "workspace.syncAfterWrite" = "File replacement occurred, but syncing its directory failed (errno %1$@).";
 "tool.summary.create" = "Create file: %1$@ (%2$lld bytes; SHA-256 %3$@)";
 "tool.summary.replace" = "Replace file: %1$@ (%2$lld bytes; SHA-256 %3$@)";
+"tool.summary.edit" = "Edit file: %1$@ (one replacement, %2$lld → %3$lld bytes; expected SHA-256 %4$@)";
+"edit.textArguments" = "oldText must be nonempty, and neither oldText nor newText may contain NUL bytes.";
+"edit.unchanged" = "oldText and newText must differ in their UTF-8 bytes.";
+"edit.expectedDigest" = "edit_file requires the current SHA-256 as 64 lowercase hexadecimal digits; missing is not supported.";
+"edit.utf8Text" = "edit_file supports UTF-8 text without NUL bytes only.";
+"edit.noMatch" = "oldText has no exact UTF-8 byte match in the current file. Read the file again before editing.";
+"edit.multipleMatches" = "oldText matches more than once, including overlapping occurrences. Provide enough surrounding text to identify one occurrence.";
+"edit.resultLimit" = "The edited file would exceed 256 KiB.";
 "tool.summary.truncated" = "%1$@… (see exact canonical arguments)";
 "tool.output.truncated" = "%1$@\n[Output preview truncated; full bounded output retained in the local tool blob.]";

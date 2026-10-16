@@ -20,6 +20,9 @@ import time
 import uuid
 from localization_resources import translations
 
+EDIT_BEFORE = '// 계산 🌱\r\nfunc add(_ a: Int, _ b: Int) -> Int {\r\n    return a - b\r\n}\r\n'
+EDIT_AFTER = EDIT_BEFORE.replace('return a - b', 'return a + b')
+
 
 def encode(value):
     return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
@@ -76,7 +79,7 @@ class FixtureServer(ThreadingHTTPServer):
             assert self.requests[scenario] <= 8, "Unbounded model retry loop"
         assert body["model"] == "fixture-model" and body["stream"] is True
         assert {t["name"] if api == "responses" else t["function"]["name"] for t in body["tools"]} == {
-            "read_file", "write_file", "list_directory", "run_command", "find_files", "search_content"}
+            "read_file", "write_file", "edit_file", "list_directory", "run_command", "find_files", "search_content"}
         results = [m for m in messages if m.get("role") == "tool" or m.get("type") == "function_call_output"]
         if api == "responses":
             assert path == "/prefix/v1/responses", path
@@ -97,6 +100,36 @@ class FixtureServer(ThreadingHTTPServer):
             return sse({"type": "response.output_text.delta", "delta": text}) + \
                 sse({"type": "response.completed", "response": {"status": "completed", "output": output}})
         assert path == "/prefix/v1/chat/completions", path
+        if scenario in {"edit-request", "edit-auto", "edit-accept", "edit-full"}:
+            if not results:
+                return chat_tool("read_file", {"path": "source.txt"}, "edit_read")
+            before = json.loads(results[0]["content"])
+            assert before["content"] == EDIT_BEFORE and not before["truncated"]
+            if len(results) == 1:
+                return chat_tool("edit_file", {"path": "source.txt", "oldText": "return a - b",
+                                 "newText": "return a + b", "expectedSHA256": before["sha256"]}, "edit_replace")
+            edited = json.loads(results[1]["content"])
+            assert edited["written"] is True and edited["replacements"] == 1
+            assert edited["beforeSHA256"] == before["sha256"]
+            assert edited["sha256"] == hashlib.sha256(EDIT_AFTER.encode()).hexdigest()
+            if len(results) == 2:
+                return chat_tool("read_file", {"path": "source.txt"}, "edit_verify")
+            assert len(results) == 3 and json.loads(results[2]["content"])["content"] == EDIT_AFTER
+            return chat_final("Exact edit preserved the surrounding Unicode and CRLF bytes.")
+        if scenario in {"edit-denied", "edit-stale", "edit-ambiguous", "edit-cancel"}:
+            if not results:
+                before = "same same\n" if scenario == "edit-ambiguous" else EDIT_BEFORE
+                return chat_tool("edit_file", {"path": "source.txt",
+                                 "oldText": "same" if scenario == "edit-ambiguous" else "return a - b",
+                                 "newText": "replacement", "expectedSHA256": hashlib.sha256(before.encode()).hexdigest()}, "edit_review")
+            assert scenario != "edit-cancel", "Cancelled edit must not be replayed to the model"
+            assert len(results) == 1 and results[0]["content"]
+            assert '"written":true' not in results[0]["content"]
+            if scenario == "edit-denied":
+                assert results[0]["content"] in translations("RuntimeMessages", "runtime.approval.userDenied")
+            if scenario == "edit-stale":
+                assert results[0]["content"] in translations("ToolMessages", "workspace.contentChanged")
+            return chat_final("The edit was not applied.")
         if scenario.startswith("search-"):
             search = {"path": ".", "nameGlob": "*.swift", "includeHidden": False, "offset": 0, "limit": 10}
             if scenario == "search-denied":
@@ -274,6 +307,8 @@ def main():
                 workspace = projects / scenario
                 workspace.mkdir()
                 (workspace / "source.txt").write_text("before 🌱\n")
+                if scenario.startswith("edit-") and scenario != "edit-allow":
+                    (workspace / "source.txt").write_bytes(("same same\n" if scenario == "edit-ambiguous" else EDIT_BEFORE).encode())
                 if scenario == "auto-sensitive-read":
                     (workspace / ".env").write_text("fixture-secret=synthetic-only\n")
                 if scenario.startswith("search-"):
@@ -417,6 +452,48 @@ def main():
                 complete(run)
                 assert json_call("tools", run["id"], "--json")[0]["state"] == "denied"
                 check("automatic mode requires approval for recursive search; denial discloses no descendant content")
+
+                for scenario, mode in [("edit-request", "requestApproval"), ("edit-auto", "autoApprove"),
+                                       ("edit-accept", "acceptEdits"), ("edit-full", "fullAccess")]:
+                    run, workspace, _ = begin(scenario, chat_profile, mode)
+                    if mode == "requestApproval":
+                        decide(pending(run, "read_file"))
+                        item = pending(run, "edit_file")
+                        assert item["effect"] == "write" and "beforeBlobID" not in item and "output" not in item
+                        assert (workspace / "source.txt").read_bytes() == EDIT_BEFORE.encode()
+                        call("approve", item["id"], "--hash", "0" * 64, expected=1)
+                        assert json_call("tool", item["id"], "--json")["state"] == "pendingApproval"
+                        decide(item)
+                        decide(pending(run, "read_file"))
+                    complete(run)
+                    assert (workspace / "source.txt").read_bytes() == EDIT_AFTER.encode()
+                    tools = json_call("tools", run["id"], "--json")
+                    assert [item["name"] for item in tools] == ["read_file", "edit_file", "read_file"]
+                    assert all(item["state"] == "completed" for item in tools)
+                    assert tools[1]["beforeBlobID"] == hashlib.sha256(EDIT_BEFORE.encode()).hexdigest()
+                    assert server.count(scenario) == 4
+                check("exact partial edit preserves Unicode and CRLF, records original content, and follows all four permission modes")
+
+                for scenario in ("edit-denied", "edit-stale", "edit-ambiguous", "edit-cancel"):
+                    run, workspace, _ = begin(scenario, chat_profile, "requestApproval")
+                    item = pending(run, "edit_file")
+                    before = (workspace / "source.txt").read_bytes()
+                    assert "beforeBlobID" not in item and "output" not in item
+                    if scenario == "edit-stale":
+                        before = b"external change must survive\n"
+                        (workspace / "source.txt").write_bytes(before)
+                    if scenario == "edit-cancel":
+                        cancel(run)
+                        call("approve", item["id"], "--hash", item["requestHash"], expected=1)
+                        assert server.count(scenario) == 1
+                    else:
+                        decide(item, yes=scenario != "edit-denied")
+                        complete(run)
+                    assert (workspace / "source.txt").read_bytes() == before
+                    final = json_call("tool", item["id"], "--json")
+                    assert final["state"] == ("denied" if scenario == "edit-denied" else "cancelled" if scenario == "edit-cancel" else "failed")
+                    if scenario != "edit-ambiguous": assert "beforeBlobID" not in final
+                check("denied, cancelled, stale and ambiguous edits leave the file unchanged and cannot reuse approval")
 
                 for old_mode in ("manual", "plan", "dontAsk"):
                     call("run", "--session", run["sessionID"], "--provider", chat_profile, "--permission", old_mode,

@@ -327,13 +327,20 @@ private struct ToolInvocationView: View {
         let _ = languages.preferences
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Label(invocation.name, systemImage: invocation.effect == .shell ? "terminal" : "doc.text")
+                Label(invocation.name, systemImage: invocation.name == "run_command" ? "terminal" : "doc.text")
                     .font(.callout.weight(.semibold))
                 Spacer()
                 Text(status).font(.caption).foregroundStyle(.secondary)
             }
             Text(invocation.summary).font(.caption).textSelection(.enabled)
-            if invocation.effect == .shell {
+            if invocation.name == "edit_file" {
+                if let preview = FileEditPreview(invocation: invocation) {
+                    FileEditPreviewView(preview: preview)
+                } else {
+                    Text(L10n.errorText("editPreview.unavailable")).font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            if invocation.name == "run_command" {
                 Text(L10n.text("tool.command.unsandboxed"))
                     .font(.caption).foregroundStyle(.orange)
             }

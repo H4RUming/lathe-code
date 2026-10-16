@@ -16,7 +16,7 @@ let package = Package(
                 .product(name: "LatheEngineHost", package: "LatheKit"),
             ],
             path: "Sources",
-            exclude: ["LatheApp.swift", "WorkspaceView.swift", "EngineSettingsView.swift"]
+            exclude: ["LatheApp.swift", "WorkspaceView.swift", "EngineSettingsView.swift", "FileEditPreviewView.swift"]
         ),
         .testTarget(name: "LatheAppChecks", dependencies: ["LatheAppSupport"], path: "Tests"),
     ]
