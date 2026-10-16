@@ -10,7 +10,7 @@ public protocol CredentialStore: Sendable {
 
 public struct CredentialStoreError: Error, LocalizedError, Sendable {
     public let status: OSStatus
-    public var errorDescription: String? { L10n.format("provider.credentials.storeFailure", table: "ProviderErrors", String(status)) }
+    public var errorDescription: String? { L10n.errorFormat("provider.credentials.storeFailure", table: "ProviderErrors", String(status)) }
 }
 
 public struct KeychainCredentialStore: CredentialStore {
@@ -37,7 +37,7 @@ public struct KeychainCredentialStore: CredentialStore {
 
     public func set(id: UUID, value: String) throws {
         guard !value.isEmpty, value.utf8.count <= 16384, !value.contains(where: { $0.isNewline || $0.asciiValue == 0 }) else {
-            throw ProviderError.invalidRequest(L10n.text("provider.credentials.invalidKey", table: "ProviderErrors"))
+            throw ProviderError.invalidRequest(L10n.errorText("provider.credentials.invalidKey", table: "ProviderErrors"))
         }
         let query = query(id)
         let attributes: [String: Any] = [kSecValueData as String: Data(value.utf8)]

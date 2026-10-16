@@ -4,9 +4,11 @@ import LatheDomain
 import SwiftUI
 
 struct WorkspaceView: View {
+    @EnvironmentObject private var languages: AppLanguageSettings
     @ObservedObject var model: LatheAppModel
 
     var body: some View {
+        let _ = languages.preferences
         NavigationSplitView {
             VStack(spacing: 0) {
                 List(selection: Binding(get: { model.selectedSessionID }, set: { model.selectSession($0) })) {
@@ -85,8 +87,10 @@ private struct SessionRow: View {
 }
 
 private struct WelcomeView: View {
+    @EnvironmentObject private var languages: AppLanguageSettings
     @ObservedObject var model: LatheAppModel
     var body: some View {
+        let _ = languages.preferences
         VStack(spacing: 22) {
             Image(systemName: "square.stack.3d.up.fill")
                 .font(.system(size: 42, weight: .light)).foregroundStyle(.tint)
@@ -112,11 +116,13 @@ private struct WelcomeView: View {
 }
 
 private struct ConversationView: View {
+    @EnvironmentObject private var languages: AppLanguageSettings
     @ObservedObject var model: LatheAppModel
     let session: SessionSnapshot
     @State private var followsTail = true
 
     var body: some View {
+        let _ = languages.preferences
         VStack(spacing: 0) {
             HStack(spacing: 10) {
                 Label(session.workspacePath, systemImage: "folder")
@@ -179,9 +185,11 @@ private struct ConversationView: View {
 }
 
 private struct RunView: View {
+    @EnvironmentObject private var languages: AppLanguageSettings
     @ObservedObject var model: LatheAppModel
     let run: RunSnapshot
     var body: some View {
+        let _ = languages.preferences
         VStack(alignment: .leading, spacing: 22) {
             VStack(alignment: .leading, spacing: 9) {
                 Text(L10n.text("conversation.userRole")).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
@@ -229,8 +237,10 @@ private struct RunView: View {
 }
 
 private struct ComposerView: View {
+    @EnvironmentObject private var languages: AppLanguageSettings
     @ObservedObject var model: LatheAppModel
     var body: some View {
+        let _ = languages.preferences
         VStack(spacing: 10) {
             HStack {
                 Picker(L10n.text("composer.model.label"), selection: $model.selectedProfileID) {
@@ -259,7 +269,7 @@ private struct ComposerView: View {
                         }
                     }
                 if model.isDraftOverLimit {
-                    Text(L10n.format("composer.input.tooLong", Int64(LatheAppModel.promptByteLimit / 1_024)))
+                    Text(L10n.errorFormat("composer.input.tooLong", Int64(LatheAppModel.promptByteLimit / 1_024)))
                         .font(.caption).foregroundStyle(.orange)
                 }
                 HStack {
@@ -308,11 +318,13 @@ private struct ComposerView: View {
 }
 
 private struct ToolInvocationView: View {
+    @EnvironmentObject private var languages: AppLanguageSettings
     @ObservedObject var model: LatheAppModel
     let invocation: ToolInvocationSnapshot
     let runIsActive: Bool
 
     var body: some View {
+        let _ = languages.preferences
         VStack(alignment: .leading, spacing: 10) {
             HStack {
                 Label(invocation.name, systemImage: invocation.effect == .shell ? "terminal" : "doc.text")
@@ -367,7 +379,9 @@ private struct ToolInvocationView: View {
 }
 
 private struct MockBadge: View {
+    @EnvironmentObject private var languages: AppLanguageSettings
     var body: some View {
+        let _ = languages.preferences
         Label(L10n.text("model.mock.label"), systemImage: "testtube.2")
             .font(.caption.weight(.medium)).foregroundStyle(.orange)
             .padding(.horizontal, 9).padding(.vertical, 5)
@@ -376,9 +390,11 @@ private struct MockBadge: View {
 }
 
 private struct ErrorBanner: View {
+    @EnvironmentObject private var languages: AppLanguageSettings
     let message: String
     let dismiss: () -> Void
     var body: some View {
+        let _ = languages.preferences
         HStack(alignment: .top, spacing: 10) {
             Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
             Text(message).font(.callout).textSelection(.enabled)

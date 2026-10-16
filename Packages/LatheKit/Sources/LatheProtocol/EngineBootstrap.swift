@@ -76,11 +76,11 @@ public enum EngineBootstrap {
             }
             while try !isReady(paths: paths, deadline: deadline) {
                 if let status = child?.status {
-                    throw SocketTransportError.launchFailed(L10n.format("protocol.launch.childExited", table: "ProtocolErrors", String(status), startupLog(paths).path))
+                    throw SocketTransportError.launchFailed(L10n.errorFormat("protocol.launch.childExited", table: "ProtocolErrors", String(status), startupLog(paths).path))
                 }
                 do { try pause(until: deadline) }
                 catch {
-                    throw SocketTransportError.launchFailed(L10n.format("protocol.launch.notReady", table: "ProtocolErrors", startupLog(paths).path))
+                    throw SocketTransportError.launchFailed(L10n.errorFormat("protocol.launch.notReady", table: "ProtocolErrors", startupLog(paths).path))
                 }
             }
         }
@@ -110,9 +110,9 @@ public enum EngineBootstrap {
         }
         var attributes: posix_spawnattr_t?
         var actions: posix_spawn_file_actions_t?
-        guard posix_spawnattr_init(&attributes) == 0 else { throw SocketTransportError.launchFailed(L10n.text("protocol.launch.spawnAttributes", table: "ProtocolErrors")) }
+        guard posix_spawnattr_init(&attributes) == 0 else { throw SocketTransportError.launchFailed(L10n.errorText("protocol.launch.spawnAttributes", table: "ProtocolErrors")) }
         defer { posix_spawnattr_destroy(&attributes) }
-        guard posix_spawn_file_actions_init(&actions) == 0 else { throw SocketTransportError.launchFailed(L10n.text("protocol.launch.spawnFileActions", table: "ProtocolErrors")) }
+        guard posix_spawn_file_actions_init(&actions) == 0 else { throw SocketTransportError.launchFailed(L10n.errorText("protocol.launch.spawnFileActions", table: "ProtocolErrors")) }
         defer { posix_spawn_file_actions_destroy(&actions) }
         let logPath = startupLog(paths).path
         let log = open(logPath, O_WRONLY | O_APPEND | O_CREAT | O_CLOEXEC | O_NOFOLLOW, 0o600)

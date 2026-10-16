@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import LatheLocalization
 import SwiftUI
 
@@ -13,10 +14,18 @@ final class AppLifecycleDelegate: NSObject, NSApplicationDelegate {
     private var terminationTask: Task<Void, Never>?
     private var terminationFinished = false
     private var statusItem: NSStatusItem?
+    private var languageObservation: AnyCancellable?
+    private weak var languages: AppLanguageSettings?
 
-    func configure(model: LatheAppModel, reopen: @escaping () -> Void) {
+    func configure(model: LatheAppModel, languages: AppLanguageSettings, reopen: @escaping () -> Void) {
         self.model = model
         reopenWorkspace = reopen
+        if self.languages !== languages {
+            self.languages = languages
+            languageObservation = languages.objectWillChange.sink { [weak self] in
+                Task { @MainActor [weak self] in self?.refreshBackgroundMenu() }
+            }
+        }
     }
 
     func register(_ window: NSWindow) {
@@ -98,21 +107,26 @@ final class AppLifecycleDelegate: NSObject, NSApplicationDelegate {
     private func enterBackground() {
         if statusItem == nil {
             let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-            item.button?.image = NSImage(systemSymbolName: "hammer.circle", accessibilityDescription: L10n.text("app.menu.backgroundStatus", table: "AppMessages"))
-            item.button?.toolTip = L10n.text("app.menu.backgroundStatus", table: "AppMessages")
-            let menu = NSMenu()
-            let open = NSMenuItem(title: L10n.text("app.menu.open", table: "AppMessages"), action: #selector(showWorkspace), keyEquivalent: "")
-            open.target = self
-            menu.addItem(open)
-            menu.addItem(.separator())
-            let quit = NSMenuItem(title: L10n.text("app.menu.quit", table: "AppMessages"), action: #selector(quitFromMenu), keyEquivalent: "")
-            quit.target = self
-            menu.addItem(quit)
-            item.menu = menu
             statusItem = item
         }
+        refreshBackgroundMenu()
         NSApp.setActivationPolicy(.accessory)
         for window in NSApp.windows { window.orderOut(nil) }
+    }
+
+    private func refreshBackgroundMenu() {
+        guard let item = statusItem else { return }
+        item.button?.image = NSImage(systemSymbolName: "hammer.circle", accessibilityDescription: L10n.text("app.menu.backgroundStatus", table: "AppMessages"))
+        item.button?.toolTip = L10n.text("app.menu.backgroundStatus", table: "AppMessages")
+        let menu = NSMenu()
+        let open = NSMenuItem(title: L10n.text("app.menu.open", table: "AppMessages"), action: #selector(showWorkspace), keyEquivalent: "")
+        open.target = self
+        menu.addItem(open)
+        menu.addItem(.separator())
+        let quit = NSMenuItem(title: L10n.text("app.menu.quit", table: "AppMessages"), action: #selector(quitFromMenu), keyEquivalent: "")
+        quit.target = self
+        menu.addItem(quit)
+        item.menu = menu
     }
 
     @objc private func showWorkspace() {

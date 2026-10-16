@@ -12,7 +12,8 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 RESOURCES = ROOT / "Packages/LatheKit/Sources/LatheLocalization/Resources"
 PLACEHOLDER = re.compile(r"%(?:(\d+)\$)?[-+ #0]*(?:\d+)?(?:\.\d+)?(hh|ll|[hlqztj])?([@diuoxXfFeEgGaAcCsSp%])")
-LOOKUP = re.compile(r'L10n\.(text|format)\(\s*"([^"\\]+)"(?:\s*,\s*table:\s*"([^"\\]+)")?')
+LOOKUP = re.compile(r'L10n\.(text|format|errorText|errorFormat)\(\s*"([^"\\]+)"(?:\s*,\s*table:\s*"([^"\\]+)")?')
+ERROR_TABLES = {"DomainErrors", "ProviderErrors", "ProtocolErrors", "HostErrors", "StorageErrors", "ExecutionErrors"}
 DISCONNECT_LOOKUP = re.compile(r'disconnectAfterFailure\(\s*"([^"\\]+)"')
 DISPLAY_LITERAL = re.compile(
     r'\b(?:Text|Button|Label|Section|LabeledContent|Picker|TextField|SecureField|Toggle|'
@@ -61,10 +62,15 @@ def source_errors(path, original, tables):
         name = name or "Interface"
         if key not in tables.get(name, {}):
             errors.append(f"{path}: missing localization {name}/{key}")
+    for method, key, name in LOOKUP.findall(source):
+        if (name in ERROR_TABLES or key.startswith("app.error.")) and not method.startswith("error"):
+            errors.append(f"{path}: error lookup {key} must use errorText/errorFormat")
     matches = []
     for pattern in (DISPLAY_LITERAL, APPKIT_LITERAL, ERROR_LITERAL, RESULT_LITERAL):
         matches.extend((m.start(), m.group(1)) for m in pattern.finditer(source))
     for start, end in error_description_ranges(source):
+        if any(not method.startswith("error") for method, _, _ in LOOKUP.findall(source[start:end])):
+            errors.append(f"{path}: errorDescription must use the error language channel")
         # Lookup keys and table names are not display text.
         body = LOOKUP.sub(lambda m: ' ' * len(m.group()), source[start:end])
         matches.extend((start + m.start(), m.group()) for m in SWIFT_TOKEN.finditer(body))
@@ -126,7 +132,7 @@ def main():
     if helper_tests.exists():
         format_sources.append(helper_tests.read_text())
     formatted_keys = {(table or "Interface", key) for source in format_sources
-                      for method, key, table in LOOKUP.findall(source) if method == "format"}
+                      for method, key, table in LOOKUP.findall(source) if method.lower().endswith("format")}
     formatted_keys.update(("AppMessages", key) for source in sources.values()
                           for key in DISCONNECT_LOOKUP.findall(source))
     for language in ("ko", "en"):

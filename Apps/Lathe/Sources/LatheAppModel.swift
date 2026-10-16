@@ -32,14 +32,14 @@ extension AppEngineClient {
     func providerProfiles() async throws -> [ProviderProfile] { [] }
     func invocations(runID: UUID) async throws -> [ToolInvocationSnapshot] { [] }
     func submitConfigured(sessionID: UUID, prompt: String, requestID: UUID, configuration: RunConfiguration?) async throws -> RunSnapshot {
-        guard configuration?.profile == nil else { throw LatheError.invalidRequest(L10n.text("app.error.realModelUnsupported", table: "AppMessages")) }
+        guard configuration?.profile == nil else { throw LatheError.invalidRequest(L10n.errorText("app.error.realModelUnsupported", table: "AppMessages")) }
         return try await submit(sessionID: sessionID, prompt: prompt, requestID: requestID)
     }
     func saveProviderProfile(_ profile: ProviderProfile, apiKey: String?, clearCredential: Bool) async throws -> [ProviderProfile] {
-        throw LatheError.invalidRequest(L10n.text("app.error.providerSaveUnavailable", table: "AppMessages"))
+        throw LatheError.invalidRequest(L10n.errorText("app.error.providerSaveUnavailable", table: "AppMessages"))
     }
     func decideApproval(invocationID: UUID, requestHash: String, approved: Bool) async throws -> ToolInvocationSnapshot {
-        throw LatheError.invalidRequest(L10n.text("app.error.approvalUnavailable", table: "AppMessages"))
+        throw LatheError.invalidRequest(L10n.errorText("app.error.approvalUnavailable", table: "AppMessages"))
     }
 }
 
@@ -166,7 +166,7 @@ final class LatheAppModel: ObservableObject {
             let info = try await client.connect()
             if let ownedInfo {
                 guard info.engineID == ownedInfo.engineID, info.processID == ownedInfo.processID else {
-                    throw LatheError.transport(L10n.text("app.error.engineIdentityMismatch", table: "AppMessages"))
+                    throw LatheError.transport(L10n.errorText("app.error.engineIdentityMismatch", table: "AppMessages"))
                 }
             }
             let latest = try await client.listSessions()
@@ -189,7 +189,7 @@ final class LatheAppModel: ObservableObject {
         } catch {
             guard generation == connectionGeneration else { return }
             isConnected = false
-            errorMessage = L10n.format("app.error.connectionFailed", table: "AppMessages", error.localizedDescription)
+            errorMessage = L10n.errorFormat("app.error.connectionFailed", table: "AppMessages", error.localizedDescription)
         }
     }
 
@@ -260,7 +260,7 @@ final class LatheAppModel: ObservableObject {
                 guard !isShuttingDown else { return }
                 if let failure = error as? RPCFailure,
                    [-32600, -32601, -32602, -32004, -32009].contains(failure.code) {
-                    errorMessage = L10n.format("app.error.submissionRejected", table: "AppMessages", failure.localizedDescription)
+                    errorMessage = L10n.errorFormat("app.error.submissionRejected", table: "AppMessages", failure.localizedDescription)
                 } else {
                     disconnectAfterFailure("app.error.submissionOutcomeUnknown", error: error)
                 }
@@ -293,7 +293,7 @@ final class LatheAppModel: ObservableObject {
                 try await refreshTools(for: page.runs, using: client, generation: generation)
             } catch {
                 guard generation == selectionGeneration else { return }
-                errorMessage = L10n.format("app.error.earlierRunsReadFailed", table: "AppMessages", error.localizedDescription)
+                errorMessage = L10n.errorFormat("app.error.earlierRunsReadFailed", table: "AppMessages", error.localizedDescription)
             }
         }
     }
@@ -307,7 +307,7 @@ final class LatheAppModel: ObservableObject {
                 _ = try await client.cancel(runID: run.id)
                 try await refreshSelectedSession(using: client)
             } catch {
-                errorMessage = L10n.format("app.error.cancellationStatusUnavailable", table: "AppMessages", error.localizedDescription)
+                errorMessage = L10n.errorFormat("app.error.cancellationStatusUnavailable", table: "AppMessages", error.localizedDescription)
             }
         }
     }
@@ -322,7 +322,7 @@ final class LatheAppModel: ObservableObject {
             try await refreshSessions(using: client)
             selectSession(session.id)
         } catch {
-            errorMessage = L10n.format("app.error.sessionCreationFailed", table: "AppMessages", error.localizedDescription)
+            errorMessage = L10n.errorFormat("app.error.sessionCreationFailed", table: "AppMessages", error.localizedDescription)
         }
     }
 
@@ -377,7 +377,7 @@ final class LatheAppModel: ObservableObject {
             if canChangeRunConfiguration { selectedProfileID = profile.id }
             return true
         } catch {
-            errorMessage = L10n.format("app.error.profileSaveFailed", table: "AppMessages", error.localizedDescription)
+            errorMessage = L10n.errorFormat("app.error.profileSaveFailed", table: "AppMessages", error.localizedDescription)
             return false
         }
     }
@@ -400,7 +400,7 @@ final class LatheAppModel: ObservableObject {
                 }
             } catch {
                 guard generation == selectionGeneration else { return }
-                errorMessage = L10n.format("app.error.approvalStatusUnavailable", table: "AppMessages", error.localizedDescription)
+                errorMessage = L10n.errorFormat("app.error.approvalStatusUnavailable", table: "AppMessages", error.localizedDescription)
             }
         }
     }
@@ -418,7 +418,7 @@ final class LatheAppModel: ObservableObject {
         guard !isShuttingDown else { return }
         isConnected = false
         pollTask?.cancel()
-        errorMessage = L10n.format(messageKey, table: "AppMessages", error.localizedDescription)
+        errorMessage = L10n.errorFormat(messageKey, table: "AppMessages", error.localizedDescription)
     }
 
     private func startPolling(using client: any AppEngineClient, generation: UInt64) {
@@ -440,7 +440,7 @@ final class LatheAppModel: ObservableObject {
                 } catch {
                     guard self.connectionGeneration == generation else { return }
                     self.isConnected = false
-                    self.errorMessage = L10n.format("app.error.runtimeConnectionLost", table: "AppMessages", error.localizedDescription)
+                    self.errorMessage = L10n.errorFormat("app.error.runtimeConnectionLost", table: "AppMessages", error.localizedDescription)
                     return
                 }
             }

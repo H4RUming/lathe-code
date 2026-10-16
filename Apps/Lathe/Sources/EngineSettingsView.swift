@@ -5,6 +5,8 @@ import SwiftUI
 
 struct EngineSettingsView: View {
     @ObservedObject var model: LatheAppModel
+    @ObservedObject var languages: AppLanguageSettings
+    @State private var selectedTab = SettingsTab.connections
     @State private var editingID: UUID?
     @State private var newProfileID = UUID()
     @State private var name = ""
@@ -15,15 +17,42 @@ struct EngineSettingsView: View {
     @State private var allowInsecureHTTP = false
     @State private var apiKey = ""
     @State private var clearCredential = false
-    @State private var savedMessage: String?
+    @State private var didSave = false
+
+    private enum SettingsTab: Hashable { case general, connections, engine }
 
     var body: some View {
-        TabView {
-            connectionForm.tabItem { Label(L10n.text("settings.tab.connections"), systemImage: "network") }
-            engineForm.tabItem { Label(L10n.text("settings.tab.engine"), systemImage: "externaldrive") }
+        TabView(selection: $selectedTab) {
+            languageForm.tabItem { Label(L10n.text("settings.tab.general"), systemImage: "gearshape") }.tag(SettingsTab.general)
+            connectionForm.tabItem { Label(L10n.text("settings.tab.connections"), systemImage: "network") }.tag(SettingsTab.connections)
+            engineForm.tabItem { Label(L10n.text("settings.tab.engine"), systemImage: "externaldrive") }.tag(SettingsTab.engine)
         }
         .padding(14).frame(width: 660, height: 680)
         .task { await model.ensureConnected() }
+    }
+
+    private var languageForm: some View {
+        Form {
+            Section(L10n.text("settings.language.section")) {
+                Picker(L10n.text("settings.language.app"), selection: Binding(
+                    get: { languages.preferences.appLanguage }, set: languages.setAppLanguage
+                )) {
+                    Text(L10n.text("settings.language.system")).tag(AppLanguage.system)
+                    Text(L10n.text("settings.language.korean")).tag(AppLanguage.ko)
+                    Text(L10n.text("settings.language.english")).tag(AppLanguage.en)
+                }
+                Text(L10n.text("settings.language.appHelp")).font(.caption).foregroundStyle(.secondary)
+                Picker(L10n.text("settings.language.errors"), selection: Binding(
+                    get: { languages.preferences.errorLanguage }, set: languages.setErrorLanguage
+                )) {
+                    Text(L10n.text("settings.language.followApp")).tag(ErrorLanguage.followApp)
+                    Text(L10n.text("settings.language.system")).tag(ErrorLanguage.system)
+                    Text(L10n.text("settings.language.korean")).tag(ErrorLanguage.ko)
+                    Text(L10n.text("settings.language.english")).tag(ErrorLanguage.en)
+                }
+                Text(L10n.text("settings.language.errorHelp")).font(.caption).foregroundStyle(.secondary)
+            }
+        }.formStyle(.grouped)
     }
 
     private var connectionForm: some View {
@@ -57,7 +86,7 @@ struct EngineSettingsView: View {
             }
             Section {
                 HStack {
-                    if let savedMessage { Text(savedMessage).font(.caption).foregroundStyle(.secondary) }
+                    if didSave { Text(L10n.text("settings.connection.savedMessage")).font(.caption).foregroundStyle(.secondary) }
                     Spacer()
                     Button(L10n.text("settings.connection.new")) { editingID = nil; newProfileID = UUID(); loadSelection() }
                     Button(L10n.text("action.save")) { save() }.buttonStyle(.borderedProminent)
@@ -104,7 +133,7 @@ struct EngineSettingsView: View {
         allowInsecureHTTP = profile?.allowInsecureHTTP ?? false
         apiKey = ""
         clearCredential = false
-        savedMessage = nil
+        didSave = false
     }
 
     private func save() {
@@ -119,7 +148,7 @@ struct EngineSettingsView: View {
                 editingID = profile.id
                 apiKey = ""
                 clearCredential = false
-                savedMessage = L10n.text("settings.connection.savedMessage")
+                didSave = true
             }
         }
     }

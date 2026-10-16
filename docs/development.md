@@ -27,24 +27,30 @@ list/read/write/run_command를 사용한다. Google·Claude 전용 adapter, 검�
 앱의 고정 표시 문구는 `LatheLocalization`의 한국어·영어 `.strings` 리소스에서 관리한다.
 `Interface`는 화면·설정·권한·도구 상태 등 UI 문구를, `AppMessages`는 연결 상태·오류 안내·프로젝트 선택
 패널·종료 경고·백그라운드 메뉴를 담는다. 버튼뿐 아니라 tooltip과 접근성 설명도 같은 경로를 사용한다.
-Swift 코드는 `L10n.text` 또는 `L10n.format`에 문장 대신 의미를 나타내는 key와 table을 전달한다.
+Swift 코드는 일반 문구의 `L10n.text/format`과 오류 문구의 `L10n.errorText/errorFormat`에
+문장 대신 의미를 나타내는 key와 table을 전달한다.
 예를 들어 `app.error.connectionFailed`는 한국어와 영어의 전체 오류 안내 문장을 보유하며 원래 오류는
 `%@`로 삽입한다. 단어·문장 조각 연결로 어순을 고정하지 않는다.
 
 코어에서 만드는 오류도 같은 리소스 경로를 사용한다. `DomainErrors`, `ProviderErrors`, `ProtocolErrors`,
 `HostErrors`, `StorageErrors`, `ExecutionErrors`는 검증·연결·저장·실행 오류를 담고, `RuntimeMessages`,
 `ToolMessages`, `RunnerMessages`, `CLIMessages`는 승인·복구·도구 요약·mock 응답·개발 도구 안내를 담는다.
-한국어·영어에 같은 key와 호환되는 placeholder를 유지한다. Foundation의 시스템/앱 언어 선택을 따르므로
-한국어로 표시되는 것 자체는 하드코딩을 뜻하지 않는다. 지원하지 않는 명시적 locale과 누락 번역은 한국어로
-fallback한다. 앱 안에서 언어를 바꾸는 설정 화면은 아직 없다.
+한국어·영어에 같은 key와 호환되는 placeholder를 유지한다. 설정의 일반 탭에서 **앱 언어**는 시스템 설정/
+한국어/영어, **오류 메시지 언어**는 앱 언어와 같게/시스템 설정/한국어/영어 중 각각 선택한다.
+기본값은 앱 언어가 시스템 설정, 오류 언어가 앱 언어와 같게이며 두 선택은 함께 저장되어 재시작 후 복원된다.
+일반 문구는 `L10n.text/format`, 오류와 오류 안의 고정 설명은 `L10n.errorText/errorFormat`을 사용한다.
+한국어 표시 자체가 하드코딩을 뜻하지 않으며, 지원하지 않는 명시적 locale과 누락 번역은 한국어로 fallback한다.
+앱 소유 화면과 메뉴는 선택 직후 갱신하지만 초안·실행·설정 입력을 다시 만들지 않는다.
+OS가 소유하는 기본 메뉴 항목과 패널 내부 문구는 운영체제의 언어를 따른다.
 
 서버·OS·SQLite의 원문 진단, 사용자 입력, 모델 응답, 명령 출력, 모델용 지시문과 protocol 식별자는
 그대로 유지한다. errno·HTTP 상태·프로토콜 버전·PID 같은 진단값도 숫자 서식을 바꾸지 않고 전달한다.
 따라서 원문 진단의 언어는 앱과 다를 수 있다. DB의 기존 이벤트와 실행 결과는 생성 당시 문자열을
-보존하며, 언어 변경 후 과거 기록을 재번역하지 않는다.
+보존하며, 언어 변경 후 과거 기록이나 이미 표시된 오류를 재번역하지 않는다. 오류 언어 변경은 새 오류부터 적용한다.
 
 번역 번들은 `.app/Contents/Resources`에 하나만 포함한다. `Contents/Helpers/lathe-runner`도 이 번들을
-찾고 앱의 선택 언어를 전달받는다. 대상 명령의 환경은 변경하지 않는다. 선택적인 개발 빌드에만 실행 파일
+찾고 `LATHE_DISPLAY_LANGUAGE`와 `LATHE_ERROR_LANGUAGE`로 앱/오류 언어를 각각 전달받는다.
+대상 명령의 환경은 변경하지 않는다. 선택적인 개발 빌드에만 실행 파일
 옆에 번역 번들을 추가하며, 기본 앱 빌드에서는 이 개발용 복사본을 제거한다.
 
 `python3 Scripts/check-localization.py`는 한국어·영어 table/key 일치, 중복 key, format 인자 타입,

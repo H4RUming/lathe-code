@@ -18,7 +18,7 @@ public struct RunConfiguration: Codable, Sendable, Equatable {
     public func validate() throws {
         guard (1...24).contains(maxSteps), approvalTimeoutSeconds.isFinite,
               (1...600).contains(approvalTimeoutSeconds) else {
-            throw LatheError.invalidRequest(L10n.text("domain.run.invalidLimits", table: "DomainErrors"))
+            throw LatheError.invalidRequest(L10n.errorText("domain.run.invalidLimits", table: "DomainErrors"))
         }
         try profile?.validate()
     }

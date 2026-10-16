@@ -41,11 +41,11 @@ public struct URLSessionStreamingTransport: HTTPStreamingTransport {
     }
 
     static func validate(response: URLResponse, requestedURL: URL?) throws {
-        guard let http = response as? HTTPURLResponse else { throw ProviderError.invalidStream(L10n.text("provider.http.notHTTP", table: "ProviderErrors")) }
-        guard http.url == requestedURL else { throw ProviderError.invalidStream(L10n.text("provider.http.redirectNotAllowed", table: "ProviderErrors")) }
+        guard let http = response as? HTTPURLResponse else { throw ProviderError.invalidStream(L10n.errorText("provider.http.notHTTP", table: "ProviderErrors")) }
+        guard http.url == requestedURL else { throw ProviderError.invalidStream(L10n.errorText("provider.http.redirectNotAllowed", table: "ProviderErrors")) }
         guard 200..<300 ~= http.statusCode else { throw ProviderError.httpStatus(http.statusCode) }
         guard http.mimeType?.lowercased() == "text/event-stream" else {
-            throw ProviderError.invalidStream(L10n.text("provider.http.requiresEventStream", table: "ProviderErrors"))
+            throw ProviderError.invalidStream(L10n.errorText("provider.http.requiresEventStream", table: "ProviderErrors"))
         }
     }
 }

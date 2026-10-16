@@ -35,12 +35,12 @@ public enum ProviderError: Error, LocalizedError, Sendable, Equatable {
     case invalidRequest(String), invalidStream(String), httpStatus(Int), responseLimit, incompleteStream, unsupportedContent
     public var errorDescription: String? {
         switch self {
-        case .invalidRequest(let detail): L10n.format("provider.error.invalidRequest", table: "ProviderErrors", detail)
-        case .invalidStream(let detail): L10n.format("provider.error.invalidStream", table: "ProviderErrors", detail)
-        case .httpStatus(let status): L10n.format("provider.error.httpStatus", table: "ProviderErrors", String(status))
-        case .responseLimit: L10n.text("provider.error.responseLimit", table: "ProviderErrors")
-        case .incompleteStream: L10n.text("provider.error.incompleteStream", table: "ProviderErrors")
-        case .unsupportedContent: L10n.text("provider.error.unsupportedContent", table: "ProviderErrors")
+        case .invalidRequest(let detail): L10n.errorFormat("provider.error.invalidRequest", table: "ProviderErrors", detail)
+        case .invalidStream(let detail): L10n.errorFormat("provider.error.invalidStream", table: "ProviderErrors", detail)
+        case .httpStatus(let status): L10n.errorFormat("provider.error.httpStatus", table: "ProviderErrors", String(status))
+        case .responseLimit: L10n.errorText("provider.error.responseLimit", table: "ProviderErrors")
+        case .incompleteStream: L10n.errorText("provider.error.incompleteStream", table: "ProviderErrors")
+        case .unsupportedContent: L10n.errorText("provider.error.unsupportedContent", table: "ProviderErrors")
         }
     }
 }

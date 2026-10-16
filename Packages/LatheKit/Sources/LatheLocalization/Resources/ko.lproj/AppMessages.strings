@@ -30,3 +30,5 @@
 "app.menu.backgroundStatus" = "Lathe · 백그라운드 실행 중";
 "app.menu.open" = "Lathe 열기";
 "app.menu.quit" = "Lathe 종료…";
+"app.menu.about" = "Lathe에 관하여";
+"app.menu.settings" = "설정…";

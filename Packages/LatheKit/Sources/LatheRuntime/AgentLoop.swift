@@ -11,16 +11,16 @@ extension EngineRuntime {
 
     public func saveProviderProfile(_ profile: ProviderProfile, apiKey: String?, clearCredential: Bool) throws -> [ProviderProfile] {
         try profile.validate()
-        guard !clearCredential || apiKey == nil else { throw LatheError.invalidRequest(L10n.text("runtime.credentials.conflictingOperation", table: "RuntimeMessages")) }
+        guard !clearCredential || apiKey == nil else { throw LatheError.invalidRequest(L10n.errorText("runtime.credentials.conflictingOperation", table: "RuntimeMessages")) }
         if let key = apiKey {
             guard !key.isEmpty, key.utf8.count <= 16_384, !key.contains(where: { $0.isNewline || $0.asciiValue == 0 }) else {
-                throw LatheError.invalidRequest(L10n.text("runtime.credentials.invalidKey", table: "RuntimeMessages"))
+                throw LatheError.invalidRequest(L10n.errorText("runtime.credentials.invalidKey", table: "RuntimeMessages"))
             }
         }
         let previous = try store.listProviderProfiles().first { $0.id == profile.id }
         if let previous, previous.baseURL != profile.baseURL, apiKey == nil, !clearCredential,
            try credentials.get(id: Self.credentialID(previous)) != nil {
-            throw LatheError.invalidRequest(L10n.text("runtime.credentials.endpointChange", table: "RuntimeMessages"))
+            throw LatheError.invalidRequest(L10n.errorText("runtime.credentials.endpointChange", table: "RuntimeMessages"))
         }
         // Credentials never enter SQLite, events or the provider profile response.
         // Endpoint binding prevents a metadata-write failure or an endpoint
@@ -45,17 +45,17 @@ extension EngineRuntime {
 
     public func decideApproval(invocationID: UUID, requestHash: String, approved: Bool) throws -> ToolInvocationSnapshot {
         var item = try store.invocation(id: invocationID)
-        guard item.requestHash == requestHash else { throw LatheError.conflict(L10n.text("runtime.approval.requestChanged", table: "RuntimeMessages")) }
+        guard item.requestHash == requestHash else { throw LatheError.conflict(L10n.errorText("runtime.approval.requestChanged", table: "RuntimeMessages")) }
         let run = try store.run(id: item.runID)
-        guard run.state == .running, workers[run.id] != nil else { throw LatheError.conflict(L10n.text("runtime.approval.runNotActive", table: "RuntimeMessages")) }
+        guard run.state == .running, workers[run.id] != nil else { throw LatheError.conflict(L10n.errorText("runtime.approval.runNotActive", table: "RuntimeMessages")) }
         if approved && [.approved, .executing, .completed].contains(item.state) { return item }
         if !approved && item.state == .denied { return item }
         guard item.state == .pendingApproval, let mode = run.configuration?.permissionMode,
               mode == .requestApproval || mode == .autoApprove || (mode == .acceptEdits && item.effect == .shell) else {
-            throw LatheError.conflict(L10n.text("runtime.approval.notPending", table: "RuntimeMessages"))
+            throw LatheError.conflict(L10n.errorText("runtime.approval.notPending", table: "RuntimeMessages"))
         }
         item.state = approved ? .approved : .denied
-        if !approved { item.output = L10n.text("runtime.approval.userDenied", table: "RuntimeMessages") }
+        if !approved { item.output = L10n.errorText("runtime.approval.userDenied", table: "RuntimeMessages") }
         try store.saveInvocation(item)
         return item
     }
@@ -91,29 +91,29 @@ extension EngineRuntime {
                     return
                 case .clientTools:
                     guard !step.calls.isEmpty, callIDs.count + step.calls.count <= 64 else {
-                        throw LatheError.invalidRequest(L10n.text("runtime.tools.callLimit", table: "RuntimeMessages"))
+                        throw LatheError.invalidRequest(L10n.errorText("runtime.tools.callLimit", table: "RuntimeMessages"))
                     }
                     for call in step.calls {
                         guard callIDs.insert(call.id).inserted else {
-                            throw LatheError.conflict(L10n.text("runtime.tools.duplicateCall", table: "RuntimeMessages"))
+                            throw LatheError.conflict(L10n.errorText("runtime.tools.duplicateCall", table: "RuntimeMessages"))
                         }
                         let output = try await invoke(call, runID: run.id, workspace: workspace, configuration: configuration)
                         try checkActive(run.id)
                         messages.append(.toolResult(callID: call.id, content: output))
                         try saveHistory(messages, runID: run.id)
                     }
-                case .blocked: throw LatheError.invalidRequest(L10n.text("runtime.model.blocked", table: "RuntimeMessages"))
-                case .truncated: throw LatheError.invalidRequest(L10n.text("runtime.model.truncated", table: "RuntimeMessages"))
-                case .noUsableOutput: throw LatheError.invalidRequest(L10n.text("runtime.model.noUsableOutput", table: "RuntimeMessages"))
+                case .blocked: throw LatheError.invalidRequest(L10n.errorText("runtime.model.blocked", table: "RuntimeMessages"))
+                case .truncated: throw LatheError.invalidRequest(L10n.errorText("runtime.model.truncated", table: "RuntimeMessages"))
+                case .noUsableOutput: throw LatheError.invalidRequest(L10n.errorText("runtime.model.noUsableOutput", table: "RuntimeMessages"))
                 }
             }
-            throw LatheError.invalidRequest(L10n.text("runtime.model.stepLimit", table: "RuntimeMessages"))
+            throw LatheError.invalidRequest(L10n.errorText("runtime.model.stepLimit", table: "RuntimeMessages"))
         } catch is CancellationError {
             // cancel() attempts the terminal receipt before awaiting cleanup.
             // A persistence failure is returned to its caller, never a reason to keep effects running.
         } catch {
             if (try? store.run(id: run.id).state) == .running {
-                let message = Self.boundedText(L10n.format("runtime.run.failed", table: "RuntimeMessages", error.localizedDescription), bytes: 4_096)
+                let message = Self.boundedText(L10n.errorFormat("runtime.run.failed", table: "RuntimeMessages", error.localizedDescription), bytes: 4_096)
                 _ = try? store.append(runID: run.id, text: message)
                 _ = try? store.finish(runID: run.id, state: .failed, reason: message)
             }
@@ -128,7 +128,7 @@ extension EngineRuntime {
     private func appendModelText(runID: UUID, text: String) throws {
         try checkActive(runID)
         guard try store.run(id: runID).response.utf8.count + text.utf8.count <= 65_536 else {
-            throw LatheError.invalidRequest(L10n.text("runtime.model.outputLimit", table: "RuntimeMessages"))
+            throw LatheError.invalidRequest(L10n.errorText("runtime.model.outputLimit", table: "RuntimeMessages"))
         }
         var chunk = ""
         for scalar in text.unicodeScalars {
@@ -141,7 +141,7 @@ extension EngineRuntime {
 
     private func saveHistory(_ messages: [ModelMessage], runID: UUID) throws {
         let data = try JSONEncoder().encode(messages)
-        guard data.count <= 2_097_152 else { throw LatheError.invalidRequest(L10n.text("runtime.history.sizeLimit", table: "RuntimeMessages")) }
+        guard data.count <= 2_097_152 else { throw LatheError.invalidRequest(L10n.errorText("runtime.history.sizeLimit", table: "RuntimeMessages")) }
         let id = try blobs.put(data)
         try store.saveModelHistory(runID: runID, blobID: id)
     }
@@ -151,7 +151,7 @@ extension EngineRuntime {
         let prepared: PreparedTool
         do { prepared = try ToolBroker.prepare(call: call, workspace: workspace, protectedPaths: [dataDirectory]) }
         catch {
-            let message = Self.boundedText(L10n.format("runtime.tools.requestRejected", table: "RuntimeMessages", error.localizedDescription), bytes: 4_096)
+            let message = Self.boundedText(L10n.errorFormat("runtime.tools.requestRejected", table: "RuntimeMessages", error.localizedDescription), bytes: 4_096)
             let hash = SHA256.hash(data: Data((call.name + "\n" + call.arguments).utf8)).map { String(format: "%02x", $0) }.joined()
             try store.saveInvocation(.init(runID: runID, callID: call.id, name: Self.boundedText(call.name, bytes: 128),
                                            arguments: Self.boundedText(call.arguments, bytes: 32_768), requestHash: hash,
@@ -174,18 +174,18 @@ extension EngineRuntime {
                 try checkActive(runID)
                 item = try store.invocation(id: item.id)
                 if ContinuousClock.now >= deadline && item.state == .pendingApproval {
-                    item.state = .denied; item.output = L10n.text("runtime.approval.timedOut", table: "RuntimeMessages")
+                    item.state = .denied; item.output = L10n.errorText("runtime.approval.timedOut", table: "RuntimeMessages")
                     try store.saveInvocation(item)
                 }
             } while item.state == .pendingApproval
         }
         try checkActive(runID)
-        guard item.state == .approved else { return item.output ?? L10n.text("runtime.tools.denied", table: "RuntimeMessages") }
+        guard item.state == .approved else { return item.output ?? L10n.errorText("runtime.tools.denied", table: "RuntimeMessages") }
         let path = workspace.standardizedFileURL.resolvingSymlinksInPath().path
         let needsLease = prepared.effect != .read
         if needsLease {
             guard !writeOwners.keys.contains(where: { $0 == path || $0.hasPrefix(path + "/") || path.hasPrefix($0 + "/") }) else {
-                item.state = .failed; item.output = L10n.text("runtime.workspace.writeLeaseBusy", table: "RuntimeMessages")
+                item.state = .failed; item.output = L10n.errorText("runtime.workspace.writeLeaseBusy", table: "RuntimeMessages")
                 try store.saveInvocation(item)
                 return item.output!
             }
@@ -229,7 +229,7 @@ extension EngineRuntime {
                     // Even a known no-effect failure needs a durable receipt
                     // before the next model step can consume its result.
                     try store.saveInvocation(item)
-                    return item.output ?? L10n.text("runtime.tools.failed", table: "RuntimeMessages")
+                    return item.output ?? L10n.errorText("runtime.tools.failed", table: "RuntimeMessages")
                 }
                 try? store.saveInvocation(item)
             }
@@ -245,7 +245,7 @@ extension EngineRuntime {
             guard result.utf8.count + piece.utf8.count <= bytes - 32 else { break }
             result += piece
         }
-        return result + L10n.text("runtime.output.truncated", table: "RuntimeMessages")
+        return result + L10n.errorText("runtime.output.truncated", table: "RuntimeMessages")
     }
 
     private static func credentialID(_ profile: ProviderProfile) -> UUID {

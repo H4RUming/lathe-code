@@ -22,9 +22,11 @@ struct LocalizationTests {
     }
 
     @Test func defaultSelectionUsesTheResourceBundlePreferredLanguage() {
-        let expected = L10n.resourceBundle.localizedString(forKey: "localization.language", value: nil, table: "Localization")
-        #expect(L10n.text("localization.language", table: "Localization") == expected)
-        #expect(["한국어", "English"].contains(expected))
+        L10n.$preferencesOverride.withValue(LocalizationPreferences()) {
+            let expected = L10n.resourceBundle.localizedString(forKey: "localization.language", value: nil, table: "Localization")
+            #expect(L10n.text("localization.language", table: "Localization") == expected)
+            #expect(["한국어", "English"].contains(expected))
+        }
     }
 
     @Test func taskScopedLanguageOverridesAreIsolatedAndPropagatable() async {

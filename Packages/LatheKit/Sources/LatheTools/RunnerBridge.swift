@@ -38,17 +38,17 @@ enum RunnerBridge {
     static func execute(_ command: CommandRequest, runnerURL: URL, journalRoot: URL) async throws -> ToolResult {
         try Task.checkCancellation()
         guard runnerURL.isFileURL, runnerURL.path.hasPrefix("/"), journalRoot.isFileURL else {
-            throw ToolError.invalid(L10n.text("runner.absolutePaths", table: "ToolMessages"))
+            throw ToolError.invalid(L10n.errorText("runner.absolutePaths", table: "ToolMessages"))
         }
-        guard mkdir(journalRoot.path, 0o700) == 0 else { let code = errno; throw ToolError.io(L10n.text("runner.operation.createDirectory", table: "ToolMessages"), code) }
+        guard mkdir(journalRoot.path, 0o700) == 0 else { let code = errno; throw ToolError.io(L10n.errorText("runner.operation.createDirectory", table: "ToolMessages"), code) }
         let directory = open(journalRoot.path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
-        guard directory >= 0 else { let code = errno; throw ToolError.io(L10n.text("runner.operation.openDirectory", table: "ToolMessages"), code) }
+        guard directory >= 0 else { let code = errno; throw ToolError.io(L10n.errorText("runner.operation.openDirectory", table: "ToolMessages"), code) }
         defer { close(directory) }
         let requestURL = journalRoot.appendingPathComponent("request.json")
         let executionURL = journalRoot.appendingPathComponent("execution", isDirectory: true)
         let request = try JSONEncoder().encode(RunnerRequest(protocolVersion: 1, command: command))
         let fd = openat(directory, "request.json", O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0o600)
-        guard fd >= 0 else { let code = errno; throw ToolError.io(L10n.text("runner.operation.createRequest", table: "ToolMessages"), code) }
+        guard fd >= 0 else { let code = errno; throw ToolError.io(L10n.errorText("runner.operation.createRequest", table: "ToolMessages"), code) }
         do {
             defer { close(fd) }
             try request.withUnsafeBytes { buffer in
@@ -56,16 +56,18 @@ enum RunnerBridge {
                 while offset < buffer.count {
                     let count = Darwin.write(fd, buffer.baseAddress!.advanced(by: offset), buffer.count - offset)
                     if count < 0 && errno == EINTR { continue }
-                    guard count > 0 else { let code = errno; throw ToolError.io(L10n.text("runner.operation.writeRequest", table: "ToolMessages"), code) }
+                    guard count > 0 else { let code = errno; throw ToolError.io(L10n.errorText("runner.operation.writeRequest", table: "ToolMessages"), code) }
                     offset += count
                 }
             }
-            guard fsync(fd) == 0, fsync(directory) == 0 else { let code = errno; throw ToolError.io(L10n.text("runner.operation.syncRequest", table: "ToolMessages"), code) }
+            guard fsync(fd) == 0, fsync(directory) == 0 else { let code = errno; throw ToolError.io(L10n.errorText("runner.operation.syncRequest", table: "ToolMessages"), code) }
         }
         let supervisor = ProcessRunner(), capture = RunnerCapture()
         let requestToHelper = CommandRequest(executable: runnerURL.path,
             arguments: ["--request", requestURL.path, "--journal", executionURL.path],
-            workingDirectory: journalRoot.path, environment: ["LATHE_DISPLAY_LANGUAGE": L10n.preferredLanguage], timeoutSeconds: command.timeoutSeconds + 8,
+            workingDirectory: journalRoot.path,
+            environment: L10n.helperEnvironment,
+            timeoutSeconds: command.timeoutSeconds + 8,
             terminationGraceSeconds: 3, outputLimitBytes: 4_194_304)
         let helperResult: CommandResult
         do {
@@ -77,40 +79,40 @@ enum RunnerBridge {
                 }
             }
         } catch {
-            throw ToolError.executionUnknown(L10n.format("runner.supervisionFailed", table: "ToolMessages", error.localizedDescription))
+            throw ToolError.executionUnknown(L10n.errorFormat("runner.supervisionFailed", table: "ToolMessages", error.localizedDescription))
         }
         let receipt: RunnerReceipt
         do {
             let data = try boundedRead(executionURL.appendingPathComponent("result.json"), limit: 65_536)
             receipt = try JSONDecoder().decode(RunnerReceipt.self, from: data)
         } catch {
-            throw ToolError.executionUnknown(L10n.format("runner.receiptUnavailable", table: "ToolMessages", helperResult.reason.localizedDescription))
+            throw ToolError.executionUnknown(L10n.errorFormat("runner.receiptUnavailable", table: "ToolMessages", helperResult.reason.localizedDescription))
         }
         guard receipt.protocolVersion == 1, receipt.status == "finished", receipt.error == nil,
               let target = receipt.result else {
-            throw ToolError.executionUnknown(receipt.error ?? L10n.text("runner.receiptInvalid", table: "ToolMessages"))
+            throw ToolError.executionUnknown(receipt.error ?? L10n.errorText("runner.receiptInvalid", table: "ToolMessages"))
         }
         var sequence: Int64 = 0, finished: CommandResult?, stdout = Data(), stderr = Data(), raw = Data()
         do {
             let bytes = capture.output
-            guard bytes.last == 10 else { throw ToolError.invalid(L10n.text("runner.incompleteStream", table: "ToolMessages")) }
+            guard bytes.last == 10 else { throw ToolError.invalid(L10n.errorText("runner.incompleteStream", table: "ToolMessages")) }
             for line in bytes.split(separator: 10, omittingEmptySubsequences: true) {
                 let record = try JSONDecoder().decode(RunnerEvent.self, from: Data(line))
                 sequence += 1
                 guard record.protocolVersion == 1, record.sequence == sequence, finished == nil else {
-                    throw ToolError.invalid(L10n.text("runner.eventMismatch", table: "ToolMessages"))
+                    throw ToolError.invalid(L10n.errorText("runner.eventMismatch", table: "ToolMessages"))
                 }
                 switch record.event {
                 case .started: break
                 case .output(let stream, let data):
-                    guard data.count <= command.outputLimitBytes - raw.count else { throw ToolError.invalid(L10n.text("runner.outputLimit", table: "ToolMessages")) }
+                    guard data.count <= command.outputLimitBytes - raw.count else { throw ToolError.invalid(L10n.errorText("runner.outputLimit", table: "ToolMessages")) }
                     raw.append(data)
                     if stream == .stderr { stderr.append(data) } else { stdout.append(data) }
                 case .finished(let result): finished = result
                 }
             }
             guard finished == target, raw.count == target.outputBytes else {
-                throw ToolError.invalid(L10n.text("runner.resultMismatch", table: "ToolMessages"))
+                throw ToolError.invalid(L10n.errorText("runner.resultMismatch", table: "ToolMessages"))
             }
         } catch { throw ToolError.executionUnknown(error.localizedDescription) }
         let object: [String: Any] = [
@@ -129,20 +131,20 @@ enum RunnerBridge {
 
     private static func boundedRead(_ url: URL, limit: Int) throws -> Data {
         let fd = open(url.path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC)
-        guard fd >= 0 else { let code = errno; throw ToolError.io(L10n.text("runner.operation.openReceipt", table: "ToolMessages"), code) }
+        guard fd >= 0 else { let code = errno; throw ToolError.io(L10n.errorText("runner.operation.openReceipt", table: "ToolMessages"), code) }
         defer { close(fd) }
         var info = stat()
         guard fstat(fd, &info) == 0, info.st_mode & S_IFMT == S_IFREG, info.st_size <= limit else {
-            throw ToolError.invalid(L10n.text("runner.receiptFileInvalid", table: "ToolMessages"))
+            throw ToolError.invalid(L10n.errorText("runner.receiptFileInvalid", table: "ToolMessages"))
         }
         var result = Data(), buffer = [UInt8](repeating: 0, count: 8192)
         while result.count <= limit {
             let count = Darwin.read(fd, &buffer, min(buffer.count, limit + 1 - result.count))
             if count < 0 && errno == EINTR { continue }
-            guard count >= 0 else { let code = errno; throw ToolError.io(L10n.text("runner.operation.readReceipt", table: "ToolMessages"), code) }
+            guard count >= 0 else { let code = errno; throw ToolError.io(L10n.errorText("runner.operation.readReceipt", table: "ToolMessages"), code) }
             if count == 0 { return result }
             result.append(contentsOf: buffer.prefix(count))
         }
-        throw ToolError.invalid(L10n.text("runner.receiptLimit", table: "ToolMessages"))
+        throw ToolError.invalid(L10n.errorText("runner.receiptLimit", table: "ToolMessages"))
     }
 }

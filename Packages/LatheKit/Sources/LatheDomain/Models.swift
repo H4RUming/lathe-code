@@ -94,7 +94,7 @@ public enum LatheError: Error, LocalizedError, Sendable {
     public var errorDescription: String? {
         switch self {
         case .invalidRequest(let s), .notFound(let s), .conflict(let s), .storage(let s), .transport(let s): s
-        case .incompatibleVersion(let version): L10n.format("domain.protocol.unsupported", table: "DomainErrors", String(version))
+        case .incompatibleVersion(let version): L10n.errorFormat("domain.protocol.unsupported", table: "DomainErrors", String(version))
         }
     }
 }

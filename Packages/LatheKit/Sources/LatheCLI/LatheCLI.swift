@@ -25,10 +25,10 @@ private struct Arguments {
             let word = input[index]
             if word == "--" { words.append(contentsOf: input.dropFirst(index + 1)); break }
             if valued.contains(word) {
-                guard index + 1 < input.count, values[word] == nil else { throw LatheError.invalidRequest(L10n.format("cli.optionValue", table: "CLIMessages", word)) }
+                guard index + 1 < input.count, values[word] == nil else { throw LatheError.invalidRequest(L10n.errorFormat("cli.optionValue", table: "CLIMessages", word)) }
                 index += 1; values[word] = input[index]
             } else if switches.contains(word) { flags.insert(word) }
-            else if word.hasPrefix("--") { throw LatheError.invalidRequest(L10n.format("cli.unknownOption", table: "CLIMessages", word)) }
+            else if word.hasPrefix("--") { throw LatheError.invalidRequest(L10n.errorFormat("cli.unknownOption", table: "CLIMessages", word)) }
             else { words.append(word) }
             index += 1
         }
@@ -36,7 +36,7 @@ private struct Arguments {
 
     func uuid(_ option: String) throws -> UUID? {
         guard let raw = values[option] else { return nil }
-        guard let id = UUID(uuidString: raw) else { throw LatheError.invalidRequest(L10n.format("cli.invalidUUID", table: "CLIMessages", option)) }
+        guard let id = UUID(uuidString: raw) else { throw LatheError.invalidRequest(L10n.errorFormat("cli.invalidUUID", table: "CLIMessages", option)) }
         return id
     }
 }
@@ -55,7 +55,7 @@ struct LatheCLI {
         var code: Int32 = 0
         do { code = try await run(Arguments(Array(CommandLine.arguments.dropFirst())), interrupted: interrupted) }
         catch is CancellationError { code = 130 }
-        catch { stderr(L10n.format("cli.error", table: "CLIMessages", error.localizedDescription)); code = 1 }
+        catch { stderr(L10n.errorFormat("cli.error", table: "CLIMessages", error.localizedDescription)); code = 1 }
         sources.forEach { $0.cancel() }
         exit(code)
     }
@@ -63,13 +63,13 @@ struct LatheCLI {
     private static func run(_ args: Arguments, interrupted: InterruptFlag) async throws -> Int32 {
         guard let command = args.words.first, !args.flags.contains("--help") else { print(help); return 0 }
         let known: Set<String> = ["status", "sessions", "new", "show", "run", "cancel", "events", "providers", "provider-set", "tools", "tool", "approve", "deny"]
-        guard known.contains(command) else { throw LatheError.invalidRequest(L10n.format("cli.unknownCommand", table: "CLIMessages", command, help)) }
+        guard known.contains(command) else { throw LatheError.invalidRequest(L10n.errorFormat("cli.unknownCommand", table: "CLIMessages", command, L10n.errorText("cli.help", table: "CLIMessages"))) }
         let root = args.values["--root"]
-        if let root, !root.hasPrefix("/") || root.contains("\0") { throw LatheError.invalidRequest(L10n.text("cli.rootAbsolute", table: "CLIMessages")) }
+        if let root, !root.hasPrefix("/") || root.contains("\0") { throw LatheError.invalidRequest(L10n.errorText("cli.rootAbsolute", table: "CLIMessages")) }
         let engine = args.values["--developer-engine"].map { URL(fileURLWithPath: $0) }
         if let rawEngine = args.values["--developer-engine"] {
             guard let root, root.hasPrefix("/"), rawEngine.hasPrefix("/"), !rawEngine.contains("\0") else {
-                throw LatheError.invalidRequest(L10n.text("cli.developerEngineArguments", table: "CLIMessages"))
+                throw LatheError.invalidRequest(L10n.errorText("cli.developerEngineArguments", table: "CLIMessages"))
             }
         }
         let paths = try EnginePaths(root: root.map { URL(fileURLWithPath: $0, isDirectory: true) })
@@ -78,7 +78,7 @@ struct LatheCLI {
         do { info = try await client.connect() }
         catch {
             guard engine == nil else { throw error }
-            throw LatheError.transport(L10n.format("cli.appUnavailable", table: "CLIMessages", error.localizedDescription))
+            throw LatheError.transport(L10n.errorFormat("cli.appUnavailable", table: "CLIMessages", error.localizedDescription))
         }
         try checkInterrupt(interrupted)
         let tail = Array(args.words.dropFirst())
@@ -91,32 +91,32 @@ struct LatheCLI {
         case "provider-set":
             guard let name = args.values["--name"], let rawAPI = args.values["--api"], let api = ProviderAPI(rawValue: rawAPI),
                   let baseURL = args.values["--base-url"], let model = args.values["--model"] else {
-                throw LatheError.invalidRequest(L10n.text("cli.providerArguments", table: "CLIMessages"))
+                throw LatheError.invalidRequest(L10n.errorText("cli.providerArguments", table: "CLIMessages"))
             }
             let profile = ProviderProfile(id: try args.uuid("--id") ?? UUID(), name: name, api: api, baseURL: baseURL,
                                           model: model, allowInsecureHTTP: args.flags.contains("--allow-http"), reasoningEffort: args.values["--reasoning-effort"])
             try profile.validate()
             let key: String?
             if args.flags.contains("--key-stdin") {
-                guard isatty(STDIN_FILENO) == 0 else { throw LatheError.invalidRequest(L10n.text("cli.keyInput", table: "CLIMessages")) }
+                guard isatty(STDIN_FILENO) == 0 else { throw LatheError.invalidRequest(L10n.errorText("cli.keyInput", table: "CLIMessages")) }
                 key = try readPrompt(interrupted: interrupted).trimmingCharacters(in: .newlines)
             } else { key = nil }
             _ = try await client.saveProviderProfile(profile, apiKey: key, clearCredential: args.flags.contains("--clear-key"))
             if json { try output(profile) } else { print(profile.id) }
         case "tools":
-            let items = try await client.invocations(runID: identifier(tail.first, name: L10n.text("cli.identifier.run", table: "CLIMessages")))
+            let items = try await client.invocations(runID: identifier(tail.first, name: L10n.errorText("cli.identifier.run", table: "CLIMessages")))
             if json { try output(items) }
             else {
                 for item in items { print(L10n.format("cli.toolRow", table: "CLIMessages", item.id.uuidString, toolState(item.state), item.summary, item.requestHash, item.output ?? "")) }
                 print(L10n.text("cli.recentTools", table: "CLIMessages"))
             }
         case "tool":
-            let item = try await client.invocation(id: identifier(tail.first, name: L10n.text("cli.identifier.invocation", table: "CLIMessages")))
+            let item = try await client.invocation(id: identifier(tail.first, name: L10n.errorText("cli.identifier.invocation", table: "CLIMessages")))
             if json { try output(item) }
             else { print(L10n.format("cli.toolDetail", table: "CLIMessages", item.id.uuidString, toolState(item.state), item.summary, item.arguments, item.requestHash, item.output ?? "")) }
         case "approve", "deny":
-            guard let hash = args.values["--hash"] else { throw LatheError.invalidRequest(L10n.text("cli.approvalHashRequired", table: "CLIMessages")) }
-            let item = try await client.decideApproval(invocationID: identifier(tail.first, name: L10n.text("cli.identifier.invocation", table: "CLIMessages")), requestHash: hash, approved: command == "approve")
+            guard let hash = args.values["--hash"] else { throw LatheError.invalidRequest(L10n.errorText("cli.approvalHashRequired", table: "CLIMessages")) }
+            let item = try await client.decideApproval(invocationID: identifier(tail.first, name: L10n.errorText("cli.identifier.invocation", table: "CLIMessages")), requestHash: hash, approved: command == "approve")
             if json { try output(item) } else { print(L10n.format("cli.itemState", table: "CLIMessages", item.id.uuidString, toolState(item.state))) }
         case "status":
             if json { try output(info) }
@@ -131,13 +131,13 @@ struct LatheCLI {
                 }
             }
         case "new":
-            guard let workspace = args.values["--workspace"] ?? tail.first else { throw LatheError.invalidRequest(L10n.text("cli.newWorkspaceRequired", table: "CLIMessages")) }
+            guard let workspace = args.values["--workspace"] ?? tail.first else { throw LatheError.invalidRequest(L10n.errorText("cli.newWorkspaceRequired", table: "CLIMessages")) }
             let title = args.values["--workspace"] == nil ? tail.dropFirst().joined(separator: " ") : tail.joined(separator: " ")
             try checkInterrupt(interrupted)
             let session = try await client.createSession(title: title.isEmpty ? URL(fileURLWithPath: workspace).lastPathComponent : title, workspacePath: workspace)
             if json { try output(session) } else { print(session.id) }
         case "show":
-            let id = try identifier(tail.first, name: L10n.text("cli.identifier.session", table: "CLIMessages"))
+            let id = try identifier(tail.first, name: L10n.errorText("cli.identifier.session", table: "CLIMessages"))
             let session = try await client.session(id: id, beforeRunID: args.uuid("--before"))
             if json { try output(session) }
             else {
@@ -148,20 +148,20 @@ struct LatheCLI {
             }
         case "cancel":
             try checkInterrupt(interrupted)
-            let run = try await client.cancel(runID: identifier(tail.first, name: L10n.text("cli.identifier.run", table: "CLIMessages")))
+            let run = try await client.cancel(runID: identifier(tail.first, name: L10n.errorText("cli.identifier.run", table: "CLIMessages")))
             if json { try output(run) } else { print(L10n.format("cli.itemState", table: "CLIMessages", run.id.uuidString, runState(run.state))) }
         case "run":
             guard args.values["--session"] == nil || args.values["--workspace"] == nil else {
-                throw LatheError.invalidRequest(L10n.text("cli.conflictingWorkspace", table: "CLIMessages"))
+                throw LatheError.invalidRequest(L10n.errorText("cli.conflictingWorkspace", table: "CLIMessages"))
             }
             let prompt: String
             if !tail.isEmpty { prompt = tail.joined(separator: " ") }
             else {
-                guard isatty(STDIN_FILENO) == 0 else { throw LatheError.invalidRequest(L10n.text("cli.promptRequired", table: "CLIMessages")) }
+                guard isatty(STDIN_FILENO) == 0 else { throw LatheError.invalidRequest(L10n.errorText("cli.promptRequired", table: "CLIMessages")) }
                 prompt = try readPrompt(interrupted: interrupted)
             }
             guard !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, prompt.utf8.count <= 32_768 else {
-                throw LatheError.invalidRequest(L10n.text("cli.promptBound", table: "CLIMessages"))
+                throw LatheError.invalidRequest(L10n.errorText("cli.promptBound", table: "CLIMessages"))
             }
             try checkInterrupt(interrupted)
             let sessionID: UUID
@@ -174,17 +174,17 @@ struct LatheCLI {
             let requestID = try args.uuid("--request-id") ?? UUID()
             let configuration: RunConfiguration?
             if let profileID = try args.uuid("--provider") {
-                guard let profile = try await client.providerProfiles().first(where: { $0.id == profileID }) else { throw LatheError.notFound(L10n.text("cli.providerMissing", table: "CLIMessages")) }
-                guard let mode = PermissionMode(rawValue: args.values["--permission"] ?? "requestApproval") else { throw LatheError.invalidRequest(L10n.text("cli.permissionInvalid", table: "CLIMessages")) }
+                guard let profile = try await client.providerProfiles().first(where: { $0.id == profileID }) else { throw LatheError.notFound(L10n.errorText("cli.providerMissing", table: "CLIMessages")) }
+                guard let mode = PermissionMode(rawValue: args.values["--permission"] ?? "requestApproval") else { throw LatheError.invalidRequest(L10n.errorText("cli.permissionInvalid", table: "CLIMessages")) }
                 guard args.flags.contains("--detach") || mode == .fullAccess else {
-                    throw LatheError.invalidRequest(L10n.text("cli.detachRequired", table: "CLIMessages"))
+                    throw LatheError.invalidRequest(L10n.errorText("cli.detachRequired", table: "CLIMessages"))
                 }
-                guard let maxSteps = Int(args.values["--max-steps"] ?? "12") else { throw LatheError.invalidRequest(L10n.text("cli.maxStepsInvalid", table: "CLIMessages")) }
+                guard let maxSteps = Int(args.values["--max-steps"] ?? "12") else { throw LatheError.invalidRequest(L10n.errorText("cli.maxStepsInvalid", table: "CLIMessages")) }
                 configuration = RunConfiguration(profile: profile, permissionMode: mode, maxSteps: maxSteps)
             } else { configuration = nil }
             let run: RunSnapshot
             do { run = try await client.submitConfigured(sessionID: sessionID, prompt: prompt, requestID: requestID, configuration: configuration) }
-            catch { stderr(L10n.format("cli.submissionIdentity", table: "CLIMessages", sessionID.uuidString, requestID.uuidString)); throw error }
+            catch { stderr(L10n.errorFormat("cli.submissionIdentity", table: "CLIMessages", sessionID.uuidString, requestID.uuidString)); throw error }
             if interrupted.isSet {
                 let stopped = try await client.cancel(runID: run.id)
                 if json || args.flags.contains("--detach") { try output(stopped) }
@@ -217,7 +217,7 @@ struct LatheCLI {
             }
         case "events":
             let rawCursor = args.values["--after"] ?? "0"
-            guard var cursor = Int64(rawCursor), cursor >= 0 else { throw LatheError.invalidRequest(L10n.text("cli.afterInvalid", table: "CLIMessages")) }
+            guard var cursor = Int64(rawCursor), cursor >= 0 else { throw LatheError.invalidRequest(L10n.errorText("cli.afterInvalid", table: "CLIMessages")) }
             let sessionID = try args.uuid("--session")
             repeat {
                 let page = try await client.events(after: cursor, sessionID: sessionID)
@@ -263,7 +263,7 @@ struct LatheCLI {
     }
 
     private static func identifier(_ raw: String?, name: String) throws -> UUID {
-        guard let raw, let id = UUID(uuidString: raw) else { throw LatheError.invalidRequest(L10n.format("cli.identifierRequired", table: "CLIMessages", name)) }
+        guard let raw, let id = UUID(uuidString: raw) else { throw LatheError.invalidRequest(L10n.errorFormat("cli.identifierRequired", table: "CLIMessages", name)) }
         return id
     }
 
@@ -289,15 +289,15 @@ struct LatheCLI {
             var descriptor = pollfd(fd: STDIN_FILENO, events: Int16(POLLIN), revents: 0)
             let ready = poll(&descriptor, 1, 100)
             if ready == 0 || (ready < 0 && errno == EINTR) { continue }
-            guard ready > 0 else { throw LatheError.invalidRequest(L10n.text("cli.stdinReadFailed", table: "CLIMessages")) }
+            guard ready > 0 else { throw LatheError.invalidRequest(L10n.errorText("cli.stdinReadFailed", table: "CLIMessages")) }
             let count = Darwin.read(STDIN_FILENO, &buffer, buffer.count)
             if count == 0 { break }
             if count < 0 && errno == EINTR { continue }
-            guard count > 0 else { throw LatheError.invalidRequest(L10n.text("cli.stdinReadFailed", table: "CLIMessages")) }
+            guard count > 0 else { throw LatheError.invalidRequest(L10n.errorText("cli.stdinReadFailed", table: "CLIMessages")) }
             data.append(contentsOf: buffer.prefix(count))
-            guard data.count <= 32_768 else { throw LatheError.invalidRequest(L10n.text("cli.stdinLimit", table: "CLIMessages")) }
+            guard data.count <= 32_768 else { throw LatheError.invalidRequest(L10n.errorText("cli.stdinLimit", table: "CLIMessages")) }
         }
-        guard let text = String(data: data, encoding: .utf8) else { throw LatheError.invalidRequest(L10n.text("cli.stdinUTF8", table: "CLIMessages")) }
+        guard let text = String(data: data, encoding: .utf8) else { throw LatheError.invalidRequest(L10n.errorText("cli.stdinUTF8", table: "CLIMessages")) }
         return text
     }
 

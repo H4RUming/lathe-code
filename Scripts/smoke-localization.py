@@ -42,10 +42,12 @@ def main():
             shutil.copy2(source / name, developer / name)
         shutil.copytree(source / "LatheKit_LatheLocalization.bundle", developer / "LatheKit_LatheLocalization.bundle")
 
-        def invoke(executable, words, language, expected):
+        def invoke(executable, words, language, expected, error_language=None):
+            environment = {"PATH": "/usr/bin:/bin", "HOME": os.environ["HOME"], "LATHE_DISPLAY_LANGUAGE": language}
+            if error_language:
+                environment["LATHE_ERROR_LANGUAGE"] = error_language
             result = subprocess.run([str(executable), *words], cwd=root,
-                                    env={"PATH": "/usr/bin:/bin", "HOME": os.environ["HOME"],
-                                         "LATHE_DISPLAY_LANGUAGE": language},
+                                    env=environment,
                                     capture_output=True, text=True, timeout=10)
             assert result.returncode == expected, (executable, language, result.returncode, result.stderr)
             return result
@@ -63,6 +65,18 @@ def main():
             expected = render(cli_messages["engine.error"], cli_messages["engine.usage"])
             assert invoke(developer / "lathe-engine", [], language, 1).stderr == expected
             print(f"PASS {language}: relocated app helper, developer tools, translated errors, raw argument preservation", flush=True)
+            error_language = "en" if language == "ko" else "ko"
+            runner_errors, cli_errors = table(error_language, "RunnerMessages"), table(error_language, "CLIMessages")
+            for runner in (app / "Contents/Helpers/lathe-runner", developer / "lathe-runner"):
+                assert invoke(runner, ["--help"], language, 0, error_language).stdout == runner_messages["runner.help"] + "\n"
+                expected = render(runner_errors["runner.error"], runner_errors["runner.usage"])
+                assert invoke(runner, [], language, 1, error_language).stderr == expected
+            assert invoke(developer / "lathe", ["--help"], language, 0, error_language).stdout == cli_messages["cli.help"] + "\n"
+            expected = render(cli_errors["cli.error"], render(cli_errors["cli.unknownOption"], option)) + "\n"
+            assert invoke(developer / "lathe", [option], language, 1, error_language).stderr == expected
+            expected = render(cli_errors["engine.error"], cli_errors["engine.usage"])
+            assert invoke(developer / "lathe-engine", [], language, 1, error_language).stderr == expected
+            print(f"PASS interface={language}, errors={error_language}: independent helper/CLI language channels", flush=True)
 
 
 if __name__ == "__main__":

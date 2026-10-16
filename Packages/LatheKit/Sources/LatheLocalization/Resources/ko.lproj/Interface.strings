@@ -92,3 +92,13 @@
 "composer.byteCount" = "%1$@ / %2$@바이트";
 "composer.input.tooLong" = "입력은 UTF-8 기준 %lldKiB 이하여야 합니다. 내용을 줄인 뒤 전송하세요.";
 "tool.state.completed" = "완료";
+"settings.tab.general" = "일반";
+"settings.language.section" = "언어";
+"settings.language.app" = "앱 언어";
+"settings.language.errors" = "오류 메시지 언어";
+"settings.language.system" = "시스템 기본값";
+"settings.language.followApp" = "앱 언어 따르기";
+"settings.language.korean" = "한국어";
+"settings.language.english" = "English";
+"settings.language.appHelp" = "앱에서 제공하는 화면과 메뉴에 즉시 적용됩니다. 작성 중인 초안과 진행 중인 작업은 유지됩니다.";
+"settings.language.errorHelp" = "새로 생성되는 오류부터 적용됩니다. 이미 표시되거나 저장된 메시지는 기존 언어를 유지하며, 프로바이더·운영체제·명령 출력은 생성된 원문을 유지합니다.";

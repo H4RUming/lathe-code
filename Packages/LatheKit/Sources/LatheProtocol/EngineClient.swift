@@ -20,9 +20,9 @@ public actor EngineClient {
         catch let error as RPCFailure where error.code == -32001 {
             let legacy = try? await call("handshake", params: .init(protocolVersion: 1))
             if let pid = legacy?.info?.processID {
-                throw LatheError.transport(L10n.format("protocol.engine.incompatibleLegacyPID", table: "ProtocolErrors", String(pid)))
+                throw LatheError.transport(L10n.errorFormat("protocol.engine.incompatibleLegacyPID", table: "ProtocolErrors", String(pid)))
             }
-            throw LatheError.transport(L10n.text("protocol.engine.incompatibleLegacy", table: "ProtocolErrors"))
+            throw LatheError.transport(L10n.errorText("protocol.engine.incompatibleLegacy", table: "ProtocolErrors"))
         }
         guard let info = result.info else { throw malformedResponse() }
         guard info.protocolVersion == EngineProtocol.version else {
@@ -116,6 +116,6 @@ public actor EngineClient {
     }
 
     private func malformedResponse() -> LatheError {
-        .transport(L10n.text("protocol.response.malformed", table: "ProtocolErrors"))
+        .transport(L10n.errorText("protocol.response.malformed", table: "ProtocolErrors"))
     }
 }

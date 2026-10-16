@@ -29,18 +29,18 @@ public struct ProviderProfile: Codable, Identifiable, Sendable, Equatable {
               components.user == nil, components.password == nil, components.query == nil, components.fragment == nil,
               components.port.map({ 1...65535 ~= $0 }) ?? true,
               components.url != nil else {
-            throw LatheError.invalidRequest(L10n.text("domain.profile.invalid", table: "DomainErrors"))
+            throw LatheError.invalidRequest(L10n.errorText("domain.profile.invalid", table: "DomainErrors"))
         }
         guard components.scheme == "https" || (components.scheme == "http" && allowInsecureHTTP) else {
-            throw LatheError.invalidRequest(L10n.text("domain.profile.requiresHTTPS", table: "DomainErrors"))
+            throw LatheError.invalidRequest(L10n.errorText("domain.profile.requiresHTTPS", table: "DomainErrors"))
         }
         guard !components.path.split(separator: "/").contains(where: { $0 == "." || $0 == ".." }) else {
-            throw LatheError.invalidRequest(L10n.text("domain.profile.relativePath", table: "DomainErrors"))
+            throw LatheError.invalidRequest(L10n.errorText("domain.profile.relativePath", table: "DomainErrors"))
         }
         if let reasoningEffort {
             guard !reasoningEffort.isEmpty, reasoningEffort.utf8.count <= 40,
                   reasoningEffort.allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "_" || $0 == "-") }) else {
-                throw LatheError.invalidRequest(L10n.text("domain.profile.invalidReasoningEffort", table: "DomainErrors"))
+                throw LatheError.invalidRequest(L10n.errorText("domain.profile.invalidReasoningEffort", table: "DomainErrors"))
             }
         }
     }

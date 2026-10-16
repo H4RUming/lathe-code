@@ -30,7 +30,7 @@ struct SSEDecoder {
     }
 
     private mutating func consumeLine() throws -> String? {
-        guard var text = String(data: line, encoding: .utf8) else { throw ProviderError.invalidStream(L10n.text("provider.stream.invalidUTF8", table: "ProviderErrors")) }
+        guard var text = String(data: line, encoding: .utf8) else { throw ProviderError.invalidStream(L10n.errorText("provider.stream.invalidUTF8", table: "ProviderErrors")) }
         line.removeAll(keepingCapacity: true)
         if firstLine { firstLine = false; if text.first == "\u{feff}" { text.removeFirst() } }
         if text.isEmpty {

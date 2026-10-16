@@ -22,9 +22,15 @@ class LocalizationGuardTests(unittest.TestCase):
                 self.assertTrue(self.check(f'var errorDescription: String? {{ switch self {{ case .failed: "{text}" }} }}'))
 
     def test_checks_nested_lookup_keys_in_error_descriptions(self):
-        source = 'var errorDescription: String? { L10n.format("error.failed", table: "Errors", detail) }'
+        source = 'var errorDescription: String? { L10n.errorFormat("error.failed", table: "Errors", detail) }'
         self.assertTrue(self.check(source))
         self.assertFalse(self.check(source, {"Errors": {"error.failed": "Failed: %@"}}))
+
+    def test_errors_must_use_the_error_language_channel(self):
+        tables = {"ProviderErrors": {"provider.failed": "Failed"}}
+        self.assertTrue(self.check('L10n.text("provider.failed", table: "ProviderErrors")', tables))
+        self.assertFalse(self.check('L10n.errorText("provider.failed", table: "ProviderErrors")', tables))
+        self.assertTrue(self.check('var errorDescription: String? { L10n.text("failed") }', {"Interface": {"failed": "Failed"}}))
 
     def test_detects_ui_status_and_error_sinks(self):
         for source in ['Text("Hello")', 'alert.messageText = "Failed"',

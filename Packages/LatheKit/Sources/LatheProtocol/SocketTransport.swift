@@ -8,14 +8,14 @@ public enum SocketTransportError: Error, LocalizedError, Sendable {
 
     public var errorDescription: String? {
         switch self {
-        case .invalidPath(let path): L10n.format("protocol.socket.invalidPath", table: "ProtocolErrors", path)
-        case .unsafePath(let path): L10n.format("protocol.socket.unsafePath", table: "ProtocolErrors", path)
-        case .systemCall(let operation, let code): L10n.format("protocol.socket.systemCall", table: "ProtocolErrors", operation, String(cString: strerror(code)), String(code))
-        case .frameTooLarge(let size): L10n.format("protocol.socket.frameTooLarge", table: "ProtocolErrors", size)
-        case .timeout: L10n.text("protocol.socket.timeout", table: "ProtocolErrors")
-        case .disconnected: L10n.text("protocol.socket.disconnected", table: "ProtocolErrors")
-        case .alreadyRunning: L10n.text("protocol.engine.alreadyRunning", table: "ProtocolErrors")
-        case .launchFailed(let reason): L10n.format("protocol.engine.launchFailed", table: "ProtocolErrors", reason)
+        case .invalidPath(let path): L10n.errorFormat("protocol.socket.invalidPath", table: "ProtocolErrors", path)
+        case .unsafePath(let path): L10n.errorFormat("protocol.socket.unsafePath", table: "ProtocolErrors", path)
+        case .systemCall(let operation, let code): L10n.errorFormat("protocol.socket.systemCall", table: "ProtocolErrors", operation, String(cString: strerror(code)), String(code))
+        case .frameTooLarge(let size): L10n.errorFormat("protocol.socket.frameTooLarge", table: "ProtocolErrors", size)
+        case .timeout: L10n.errorText("protocol.socket.timeout", table: "ProtocolErrors")
+        case .disconnected: L10n.errorText("protocol.socket.disconnected", table: "ProtocolErrors")
+        case .alreadyRunning: L10n.errorText("protocol.engine.alreadyRunning", table: "ProtocolErrors")
+        case .launchFailed(let reason): L10n.errorFormat("protocol.engine.launchFailed", table: "ProtocolErrors", reason)
         }
     }
 }
@@ -270,7 +270,7 @@ enum SocketIO {
         guard getpeereid(fd, &uid, &gid) == 0 else {
             throw SocketTransportError.systemCall("getpeereid", errno)
         }
-        guard uid == geteuid() else { throw SocketTransportError.unsafePath(L10n.format("protocol.socket.peerUID", table: "ProtocolErrors", String(uid))) }
+        guard uid == geteuid() else { throw SocketTransportError.unsafePath(L10n.errorFormat("protocol.socket.peerUID", table: "ProtocolErrors", String(uid))) }
     }
 
     static func connect(_ fd: Int32, path: String, deadline: UInt64) throws {

@@ -32,7 +32,7 @@ actor ModelStreamDecoder {
                 if text.isEmpty, let final = completed, !final.text.isEmpty { try await appendText(final.text) }
             } else {
                 guard let object = try JSONSerialization.jsonObject(with: Data(payload.utf8)) as? [String: Any] else {
-                    throw ProviderError.invalidStream(L10n.text("provider.stream.requiresJSONObject", table: "ProviderErrors"))
+                    throw ProviderError.invalidStream(L10n.errorText("provider.stream.requiresJSONObject", table: "ProviderErrors"))
                 }
                 if profile.api == .openAIChat { try await consumeChat(object) }
                 else { try await consumeResponses(object) }
@@ -54,13 +54,13 @@ actor ModelStreamDecoder {
     }
 
     private func consumeChat(_ object: [String: Any]) async throws {
-        if object["error"] != nil { throw ProviderError.invalidStream(L10n.text("provider.stream.serverError", table: "ProviderErrors")) }
-        guard let choices = object["choices"] as? [[String: Any]] else { throw ProviderError.invalidStream(L10n.text("provider.stream.missingChoices", table: "ProviderErrors")) }
+        if object["error"] != nil { throw ProviderError.invalidStream(L10n.errorText("provider.stream.serverError", table: "ProviderErrors")) }
+        guard let choices = object["choices"] as? [[String: Any]] else { throw ProviderError.invalidStream(L10n.errorText("provider.stream.missingChoices", table: "ProviderErrors")) }
         // Usage-only trailing chunks are valid. Multiple candidates are deliberately unsupported.
         guard choices.count <= 1 else { throw ProviderError.unsupportedContent }
         guard let choice = choices.first else { return }
         guard choice["index"] as? Int == 0, let delta = choice["delta"] as? [String: Any], chatFinish == nil else {
-            throw ProviderError.invalidStream(L10n.text("provider.stream.invalidChoiceOrder", table: "ProviderErrors"))
+            throw ProviderError.invalidStream(L10n.errorText("provider.stream.invalidChoiceOrder", table: "ProviderErrors"))
         }
         if let value = delta["content"], !(value is NSNull) {
             guard let fragment = value as? String else { throw ProviderError.unsupportedContent }
@@ -84,7 +84,7 @@ actor ModelStreamDecoder {
         }
         if delta["audio"] != nil || delta["function_call"] != nil { throw ProviderError.unsupportedContent }
         if let rawCalls = delta["tool_calls"], !(rawCalls is NSNull) {
-            guard let calls = rawCalls as? [[String: Any]] else { throw ProviderError.invalidStream(L10n.text("provider.stream.invalidToolCalls", table: "ProviderErrors")) }
+            guard let calls = rawCalls as? [[String: Any]] else { throw ProviderError.invalidStream(L10n.errorText("provider.stream.invalidToolCalls", table: "ProviderErrors")) }
             for call in calls {
                 guard let index = call["index"] as? Int, 0..<32 ~= index else { throw ProviderError.responseLimit }
                 if let type = call["type"] as? String, type != "function" { throw ProviderError.unsupportedContent }
@@ -110,13 +110,13 @@ actor ModelStreamDecoder {
         case "length": outcome = .truncated
         case "content_filter": outcome = .blocked
         case "stop":
-            guard toolParts.isEmpty else { throw ProviderError.invalidStream(L10n.text("provider.stream.toolsInStop", table: "ProviderErrors")) }
+            guard toolParts.isEmpty else { throw ProviderError.invalidStream(L10n.errorText("provider.stream.toolsInStop", table: "ProviderErrors")) }
             outcome = !refusal.isEmpty ? .blocked : (text.isEmpty ? .noUsableOutput : .final)
         case "tool_calls":
-            guard !toolParts.isEmpty, refusal.isEmpty else { throw ProviderError.invalidStream(L10n.text("provider.stream.toolFinishMismatch", table: "ProviderErrors")) }
+            guard !toolParts.isEmpty, refusal.isEmpty else { throw ProviderError.invalidStream(L10n.errorText("provider.stream.toolFinishMismatch", table: "ProviderErrors")) }
             calls = try checkedCalls(toolParts.sorted(by: { $0.key < $1.key }).map { ModelToolCall(id: $0.value.id, name: $0.value.name, arguments: $0.value.arguments) })
             outcome = .clientTools
-        default: throw ProviderError.invalidStream(L10n.text("provider.stream.unsupportedChatFinish", table: "ProviderErrors"))
+        default: throw ProviderError.invalidStream(L10n.errorText("provider.stream.unsupportedChatFinish", table: "ProviderErrors"))
         }
         var raw: [String: Any] = ["role": "assistant", "content": text]
         for (field, value) in reasoningFields { raw[field] = value }
@@ -127,34 +127,34 @@ actor ModelStreamDecoder {
     }
 
     private func consumeResponses(_ object: [String: Any]) async throws {
-        guard let type = object["type"] as? String else { throw ProviderError.invalidStream(L10n.text("provider.stream.missingResponsesType", table: "ProviderErrors")) }
+        guard let type = object["type"] as? String else { throw ProviderError.invalidStream(L10n.errorText("provider.stream.missingResponsesType", table: "ProviderErrors")) }
         switch type {
         case "response.output_text.delta":
-            guard let delta = object["delta"] as? String else { throw ProviderError.invalidStream(L10n.text("provider.stream.missingTextDelta", table: "ProviderErrors")) }
+            guard let delta = object["delta"] as? String else { throw ProviderError.invalidStream(L10n.errorText("provider.stream.missingTextDelta", table: "ProviderErrors")) }
             try await appendText(delta)
-        case "error", "response.failed": throw ProviderError.invalidStream(L10n.text("provider.stream.serverFailure", table: "ProviderErrors"))
+        case "error", "response.failed": throw ProviderError.invalidStream(L10n.errorText("provider.stream.serverFailure", table: "ProviderErrors"))
         case "response.completed", "response.incomplete":
             guard let response = object["response"] as? [String: Any],
                   let output = response["output"] as? [[String: Any]], output.count <= 128,
                   response["status"] as? String == (type == "response.completed" ? "completed" : "incomplete") else {
-                throw ProviderError.invalidStream(L10n.text("provider.stream.responsesStatusMismatch", table: "ProviderErrors"))
+                throw ProviderError.invalidStream(L10n.errorText("provider.stream.responsesStatusMismatch", table: "ProviderErrors"))
             }
             var finalText = ""
             var calls: [ModelToolCall] = []
             var blocked = false
             for item in output {
                 if type == "response.completed", let status = item["status"] as? String, status != "completed" {
-                    throw ProviderError.invalidStream(L10n.text("provider.stream.incompleteOutputItem", table: "ProviderErrors"))
+                    throw ProviderError.invalidStream(L10n.errorText("provider.stream.incompleteOutputItem", table: "ProviderErrors"))
                 }
                 switch item["type"] as? String {
                 case "message":
                     guard item["role"] as? String == "assistant", let content = item["content"] as? [[String: Any]] else {
-                        throw ProviderError.invalidStream(L10n.text("provider.stream.invalidAssistantMessage", table: "ProviderErrors"))
+                        throw ProviderError.invalidStream(L10n.errorText("provider.stream.invalidAssistantMessage", table: "ProviderErrors"))
                     }
                     for part in content {
                         switch part["type"] as? String {
                         case "output_text":
-                            guard let value = part["text"] as? String else { throw ProviderError.invalidStream(L10n.text("provider.stream.missingFinalText", table: "ProviderErrors")) }
+                            guard let value = part["text"] as? String else { throw ProviderError.invalidStream(L10n.errorText("provider.stream.missingFinalText", table: "ProviderErrors")) }
                             finalText += value
                         case "refusal": blocked = true; refusal += part["refusal"] as? String ?? ""
                         default: throw ProviderError.unsupportedContent
@@ -162,7 +162,7 @@ actor ModelStreamDecoder {
                     }
                 case "function_call":
                     guard let id = item["call_id"] as? String, let name = item["name"] as? String, let arguments = item["arguments"] as? String else {
-                        throw ProviderError.invalidStream(L10n.text("provider.stream.invalidFinalFunctionCall", table: "ProviderErrors"))
+                        throw ProviderError.invalidStream(L10n.errorText("provider.stream.invalidFinalFunctionCall", table: "ProviderErrors"))
                     }
                     calls.append(ModelToolCall(id: id, name: name, arguments: arguments))
                 case "reasoning": break // Preserve the complete encrypted/signed item for the next request.
@@ -171,7 +171,7 @@ actor ModelStreamDecoder {
             }
             guard finalText.utf8.count <= 2 * 1024 * 1024, refusal.utf8.count <= 65536 else { throw ProviderError.responseLimit }
             if text.isEmpty { try await appendText(finalText) }
-            else if text != finalText { throw ProviderError.invalidStream(L10n.text("provider.stream.finalTextMismatch", table: "ProviderErrors")) }
+            else if text != finalText { throw ProviderError.invalidStream(L10n.errorText("provider.stream.finalTextMismatch", table: "ProviderErrors")) }
             let outcome: ModelStepOutcome
             if blocked { outcome = .blocked; calls = [] }
             else if type == "response.incomplete" {
@@ -188,12 +188,12 @@ actor ModelStreamDecoder {
     }
 
     private func checkedCalls(_ calls: [ModelToolCall]) throws -> [ModelToolCall] {
-        guard calls.count <= 32, Set(calls.map(\.id)).count == calls.count else { throw ProviderError.invalidStream(L10n.text("provider.stream.toolIDsInvalid", table: "ProviderErrors")) }
+        guard calls.count <= 32, Set(calls.map(\.id)).count == calls.count else { throw ProviderError.invalidStream(L10n.errorText("provider.stream.toolIDsInvalid", table: "ProviderErrors")) }
         for call in calls {
             guard !call.id.isEmpty, call.id.utf8.count <= 512, allowedTools.contains(call.name),
                   call.arguments.utf8.count <= 256 * 1024,
                   (try? JSONSerialization.jsonObject(with: Data(call.arguments.utf8))) is [String: Any] else {
-                throw ProviderError.invalidStream(L10n.text("provider.stream.incompleteOrUnknownTool", table: "ProviderErrors"))
+                throw ProviderError.invalidStream(L10n.errorText("provider.stream.incompleteOrUnknownTool", table: "ProviderErrors"))
             }
         }
         return calls

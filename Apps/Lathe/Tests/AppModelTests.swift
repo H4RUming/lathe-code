@@ -1,6 +1,6 @@
 import Foundation
 import LatheDomain
-import LatheLocalization
+@testable import LatheLocalization
 import LatheProtocol
 import Testing
 @testable import LatheAppSupport
@@ -317,6 +317,38 @@ struct AppModelTests {
         model.draft = ""
         #expect(!model.hasUnsentDrafts)
         #expect(!(await model.requiresTerminationConfirmation()))
+    }
+
+    @Test func changingLanguagePreservesDraftsSessionAndActiveRun() async throws {
+        let store = AppLanguagePreferenceFixture(LocalizationPreferences(appLanguage: .en, errorLanguage: .followApp))
+        try await L10n.$preferenceStoreOverride.withValue(store) {
+            let engine = FixtureEngine()
+            let invocation = await engine.seedApproval()
+            let model = LatheAppModel(client: engine)
+            let languages = store.makeSettings()
+            await model.connect()
+            let initialConnectionCount = await engine.connectionCount
+            let active = try #require(model.selectedSession?.activeRun)
+            model.draft = "unsent first draft"
+            model.selectSession(engine.secondID)
+            try await waitUntil { model.selectedSession?.id == engine.secondID }
+            model.draft = "unsent second draft"
+
+            languages.setAppLanguage(.ko)
+            languages.setErrorLanguage(.en)
+            #expect(model.selectedSessionID == engine.secondID)
+            #expect(model.draft == "unsent second draft")
+            #expect(model.connectionLabel == "로컬 엔진 연결됨")
+
+            model.selectSession(engine.firstID)
+            try await waitUntil { model.selectedSession?.id == engine.firstID }
+            #expect(model.draft == "unsent first draft")
+            #expect(model.selectedSession?.activeRun == active)
+            #expect(model.toolInvocations[invocation.runID]?.first == invocation)
+            #expect(await engine.connectionCount == initialConnectionCount)
+            #expect(await engine.submissionCount == 0)
+            await model.shutdown()
+        }
     }
 
     private func waitUntil(_ condition: @MainActor () async -> Bool) async throws {

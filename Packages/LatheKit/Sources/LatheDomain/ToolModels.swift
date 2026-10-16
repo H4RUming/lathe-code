@@ -13,7 +13,7 @@ public enum PermissionMode: String, Codable, CaseIterable, Sendable {
         case "manual", "plan", "dontAsk": self = .requestApproval
         default:
             guard let mode = Self(rawValue: value) else {
-                throw DecodingError.dataCorruptedError(in: container, debugDescription: L10n.format("domain.permission.unknown", table: "DomainErrors", value))
+                throw DecodingError.dataCorruptedError(in: container, debugDescription: L10n.errorFormat("domain.permission.unknown", table: "DomainErrors", value))
             }
             self = mode
         }

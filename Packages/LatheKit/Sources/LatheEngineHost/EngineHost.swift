@@ -45,9 +45,9 @@ public actor EngineHost {
     public func start() async throws -> EngineInfo {
         try Task.checkCancellation()
         if phase == .running, let resources { return resources.info }
-        guard phase == .idle else { throw LatheError.conflict(L10n.text("host.start.stopped", table: "HostErrors")) }
+        guard phase == .idle else { throw LatheError.conflict(L10n.errorText("host.start.stopped", table: "HostErrors")) }
         guard runnerURL.isFileURL, runnerURL.path.hasPrefix("/") else {
-            throw LatheError.invalidRequest(L10n.text("host.start.runnerPath", table: "HostErrors"))
+            throw LatheError.invalidRequest(L10n.errorText("host.start.runnerPath", table: "HostErrors"))
         }
         let acquiredLease = try EngineLease(paths: paths)
         let runtime = try EngineRuntime(databaseURL: paths.database, chunkDelay: chunkDelay, runnerURL: runnerURL,
@@ -113,7 +113,7 @@ public actor EngineHost {
         guard resources?.generation == generation, phase == .running else { return }
         switch result {
         case .failure(let error): failure = error
-        case .success: failure = LatheError.transport(L10n.text("host.listener.ended", table: "HostErrors"))
+        case .success: failure = LatheError.transport(L10n.errorText("host.listener.ended", table: "HostErrors"))
         }
         await stop()
     }

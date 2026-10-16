@@ -92,3 +92,13 @@
 "composer.byteCount" = "%1$@ / %2$@ bytes";
 "composer.input.tooLong" = "Messages must be no larger than %lld KiB in UTF-8. Shorten your message before sending.";
 "tool.state.completed" = "Completed";
+"settings.tab.general" = "General";
+"settings.language.section" = "Language";
+"settings.language.app" = "App Language";
+"settings.language.errors" = "Error Message Language";
+"settings.language.system" = "System Default";
+"settings.language.followApp" = "Follow App Language";
+"settings.language.korean" = "한국어";
+"settings.language.english" = "English";
+"settings.language.appHelp" = "App-provided screens and menus update immediately. Your drafts and current work are preserved.";
+"settings.language.errorHelp" = "Applies to newly created errors. Previously displayed or saved messages keep their original language. Provider, operating system and command output stays as generated.";

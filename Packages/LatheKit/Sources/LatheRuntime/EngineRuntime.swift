@@ -18,7 +18,7 @@ public actor EngineRuntime {
 
     public init(databaseURL: URL, chunkDelay: Duration = .milliseconds(120), runnerURL: URL? = nil,
                 credentials: any CredentialStore = KeychainCredentialStore(), modelClient: ModelClient = ModelClient()) throws {
-        guard chunkDelay >= .zero else { throw LatheError.invalidRequest(L10n.text("runtime.stream.invalidDelay", table: "RuntimeMessages")) }
+        guard chunkDelay >= .zero else { throw LatheError.invalidRequest(L10n.errorText("runtime.stream.invalidDelay", table: "RuntimeMessages")) }
         let store = try SQLiteStore(databaseURL: databaseURL)
         try store.recoverInterruptedRuns()
         self.store = store
@@ -41,23 +41,23 @@ public actor EngineRuntime {
     public func createSession(title: String, workspacePath: String) async throws -> SessionSnapshot {
         let title = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !title.isEmpty, title.count <= 120, title.utf8.count <= 512 else {
-            throw LatheError.invalidRequest(L10n.text("runtime.session.invalidTitle", table: "RuntimeMessages"))
+            throw LatheError.invalidRequest(L10n.errorText("runtime.session.invalidTitle", table: "RuntimeMessages"))
         }
         guard workspacePath.hasPrefix("/"), !workspacePath.contains("\0") else {
-            throw LatheError.invalidRequest(L10n.text("runtime.workspace.absolutePathRequired", table: "RuntimeMessages"))
+            throw LatheError.invalidRequest(L10n.errorText("runtime.workspace.absolutePathRequired", table: "RuntimeMessages"))
         }
         let url = URL(fileURLWithPath: workspacePath, isDirectory: true).standardizedFileURL.resolvingSymlinksInPath()
         var isDirectory: ObjCBool = false
         guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory), isDirectory.boolValue else {
-            throw LatheError.invalidRequest(L10n.text("runtime.workspace.directoryMissing", table: "RuntimeMessages"))
+            throw LatheError.invalidRequest(L10n.errorText("runtime.workspace.directoryMissing", table: "RuntimeMessages"))
         }
         return try store.createSession(title: title, workspacePath: url.path)
     }
 
     public func submit(sessionID: UUID, prompt: String, requestID: UUID, configuration: RunConfiguration? = nil) async throws -> RunSnapshot {
-        guard !shuttingDown else { throw LatheError.conflict(L10n.text("runtime.engine.shuttingDown", table: "RuntimeMessages")) }
+        guard !shuttingDown else { throw LatheError.conflict(L10n.errorText("runtime.engine.shuttingDown", table: "RuntimeMessages")) }
         guard !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, prompt.utf8.count <= 32 * 1_024 else {
-            throw LatheError.invalidRequest(L10n.text("runtime.prompt.invalidSize", table: "RuntimeMessages"))
+            throw LatheError.invalidRequest(L10n.errorText("runtime.prompt.invalidSize", table: "RuntimeMessages"))
         }
         try configuration?.validate()
         let result = try store.submit(sessionID: sessionID, prompt: prompt, requestID: requestID, configuration: configuration)
@@ -93,7 +93,7 @@ public actor EngineRuntime {
         shuttingDown = true
         let pending = workers
         for (id, task) in pending {
-            _ = try? store.finish(runID: id, state: .interrupted, reason: L10n.text("runtime.engine.stopped", table: "RuntimeMessages"))
+            _ = try? store.finish(runID: id, state: .interrupted, reason: L10n.errorText("runtime.engine.stopped", table: "RuntimeMessages"))
             try? store.invalidatePendingInvocations(runID: id)
             task.cancel()
         }
@@ -120,7 +120,7 @@ public actor EngineRuntime {
         } catch {
             // If storage remains unavailable, startup recovery marks this run
             // interrupted. A failed write can never produce a completion event.
-            _ = try? store.finish(runID: runID, state: .interrupted, reason: L10n.text("runtime.mock.storageFailed", table: "RuntimeMessages"))
+            _ = try? store.finish(runID: runID, state: .interrupted, reason: L10n.errorText("runtime.mock.storageFailed", table: "RuntimeMessages"))
         }
     }
 
