@@ -1,5 +1,6 @@
 import Darwin
 import Foundation
+import LatheLocalization
 import LatheDomain
 import LatheProtocol
 import LatheProviders
@@ -44,9 +45,9 @@ public actor EngineHost {
     public func start() async throws -> EngineInfo {
         try Task.checkCancellation()
         if phase == .running, let resources { return resources.info }
-        guard phase == .idle else { throw LatheError.conflict("종료 중이거나 종료된 앱 엔진은 다시 시작할 수 없습니다.") }
+        guard phase == .idle else { throw LatheError.conflict(L10n.text("host.start.stopped", table: "HostErrors")) }
         guard runnerURL.isFileURL, runnerURL.path.hasPrefix("/") else {
-            throw LatheError.invalidRequest("runner의 절대 파일 경로가 필요합니다.")
+            throw LatheError.invalidRequest(L10n.text("host.start.runnerPath", table: "HostErrors"))
         }
         let acquiredLease = try EngineLease(paths: paths)
         let runtime = try EngineRuntime(databaseURL: paths.database, chunkDelay: chunkDelay, runnerURL: runnerURL,
@@ -112,7 +113,7 @@ public actor EngineHost {
         guard resources?.generation == generation, phase == .running else { return }
         switch result {
         case .failure(let error): failure = error
-        case .success: failure = LatheError.transport("앱 엔진의 listener가 예기치 않게 종료되었습니다.")
+        case .success: failure = LatheError.transport(L10n.text("host.listener.ended", table: "HostErrors"))
         }
         await stop()
     }

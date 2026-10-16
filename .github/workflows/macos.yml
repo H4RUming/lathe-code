@@ -29,8 +29,10 @@ jobs:
           swift --version
       - name: Package tests
         run: swift test --package-path Packages/LatheKit --scratch-path .build/ci-tests
-      - name: Localization keys and native UI text
-        run: python3 Scripts/check-localization.py
+      - name: Localization keys and app/core error text
+        run: |
+          python3 Scripts/test-localization.py
+          python3 Scripts/check-localization.py
       - name: Native app state regression tests
         run: swift test --package-path Apps/Lathe --scratch-path .build/ci-app-tests
       - name: Build native app and opt-in test tools
@@ -39,6 +41,8 @@ jobs:
         run: |
           test -x .build/macos/Lathe.app/Contents/Helpers/lathe-runner
           test ! -e .build/macos/Lathe.app/Contents/Helpers/lathe-engine
+      - name: Relocated app and helper localization
+        run: python3 Scripts/smoke-localization.py --bin-dir .build/macos
       - name: Native app ownership and lifecycle smoke
         run: python3 Scripts/smoke-app.py --bin-dir .build/macos --output .build/probes/app-lifecycle.json
       - name: Engine and CLI integration smoke

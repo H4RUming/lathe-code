@@ -12,6 +12,7 @@ import subprocess
 import tempfile
 import time
 import uuid
+from localization_resources import translations
 
 
 class Invocation:
@@ -228,7 +229,8 @@ def main():
                 run = start(name).started()
                 run.raw(control)
                 receipt = run.finish(code=1, reason="cancelled", status="failed")
-                assert "Control channel failed" in receipt["error"]
+                assert any(receipt["error"].startswith(value.split("%", 1)[0])
+                           for value in translations("RunnerMessages", "control.channelFailed"))
             print("PASS malformed controls cancel and persist failed receipts", flush=True)
 
             for name, close_reader in (("owner-backpressure", False), ("owner-disconnected", True)):

@@ -1,8 +1,20 @@
 import Foundation
+import LatheLocalization
 
 public enum CommandMode: String, Codable, Sendable { case pipes, pty }
 public enum CommandOutputStream: String, Codable, Sendable { case stdout, stderr, terminal }
-public enum CommandTerminationReason: String, Codable, Sendable { case exited, cancelled, timedOut, outputLimit }
+public enum CommandTerminationReason: String, Codable, Sendable {
+    case exited, cancelled, timedOut, outputLimit
+
+    public var localizedDescription: String {
+        switch self {
+        case .exited: L10n.text("execution.reason.exited", table: "ExecutionErrors")
+        case .cancelled: L10n.text("execution.reason.cancelled", table: "ExecutionErrors")
+        case .timedOut: L10n.text("execution.reason.timedOut", table: "ExecutionErrors")
+        case .outputLimit: L10n.text("execution.reason.outputLimit", table: "ExecutionErrors")
+        }
+    }
+}
 
 public struct CommandRequest: Codable, Sendable {
     public let executable: String
@@ -28,20 +40,20 @@ public struct CommandRequest: Codable, Sendable {
 
     public func validate() throws {
         guard executable.hasPrefix("/"), workingDirectory.hasPrefix("/") else {
-            throw CommandExecutionError.invalidRequest("executable and workingDirectory must be absolute paths")
+            throw CommandExecutionError.invalidRequest(L10n.text("execution.absolutePaths", table: "ExecutionErrors"))
         }
         let values = [executable, workingDirectory] + arguments + Array(environment.keys) + Array(environment.values)
         guard !values.contains(where: { $0.utf8.contains(0) }) else {
-            throw CommandExecutionError.invalidRequest("paths, arguments and environment must not contain NUL")
+            throw CommandExecutionError.invalidRequest(L10n.text("execution.noNUL", table: "ExecutionErrors"))
         }
         guard !environment.keys.contains(where: { $0.isEmpty || $0.contains("=") }) else {
-            throw CommandExecutionError.invalidRequest("environment keys must be nonempty and contain no equals sign")
+            throw CommandExecutionError.invalidRequest(L10n.text("execution.environmentKeys", table: "ExecutionErrors"))
         }
         guard timeoutSeconds.isFinite, timeoutSeconds > 0, timeoutSeconds <= 86_400,
               terminationGraceSeconds.isFinite, (0...10).contains(terminationGraceSeconds),
               (1...67_108_864).contains(outputLimitBytes),
               (1...65_535).contains(terminalColumns), (1...65_535).contains(terminalRows) else {
-            throw CommandExecutionError.invalidRequest("invalid timeout, grace period, output bound or terminal dimensions")
+            throw CommandExecutionError.invalidRequest(L10n.text("execution.invalidBounds", table: "ExecutionErrors"))
         }
     }
 }
@@ -72,11 +84,11 @@ public enum CommandExecutionError: Error, LocalizedError, Sendable {
     public var errorDescription: String? {
         switch self {
         case .invalidRequest(let message): return message
-        case .alreadyUsed: return "A ProcessRunner can execute only one command"
-        case .notRunning: return "The command is not running"
-        case .inputClosed: return "Command input is closed"
-        case .inputLimit: return "Pending command input exceeds 1 MiB"
-        case .systemCall(let operation, let code): return "\(operation) failed (errno \(code))"
+        case .alreadyUsed: return L10n.text("execution.alreadyUsed", table: "ExecutionErrors")
+        case .notRunning: return L10n.text("execution.notRunning", table: "ExecutionErrors")
+        case .inputClosed: return L10n.text("execution.inputClosed", table: "ExecutionErrors")
+        case .inputLimit: return L10n.text("execution.inputLimit", table: "ExecutionErrors")
+        case .systemCall(let operation, let code): return L10n.format("execution.systemCall", table: "ExecutionErrors", operation, String(code))
         }
     }
 }

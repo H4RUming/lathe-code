@@ -1,4 +1,5 @@
 import Foundation
+import LatheLocalization
 import LatheDomain
 
 public enum ModelMessage: Codable, Sendable, Equatable {
@@ -34,12 +35,12 @@ public enum ProviderError: Error, LocalizedError, Sendable, Equatable {
     case invalidRequest(String), invalidStream(String), httpStatus(Int), responseLimit, incompleteStream, unsupportedContent
     public var errorDescription: String? {
         switch self {
-        case .invalidRequest(let detail): "모델 요청 오류: \(detail)"
-        case .invalidStream(let detail): "모델 스트림 오류: \(detail)"
-        case .httpStatus(let status): "모델 서버가 HTTP \(status)를 반환했습니다."
-        case .responseLimit: "모델 응답이 안전한 수신 한도를 초과했습니다."
-        case .incompleteStream: "모델 연결이 정상 완료 이벤트 전에 종료되었습니다. 미완성 도구 호출은 실행하지 않습니다."
-        case .unsupportedContent: "이 어댑터는 아직 해당 서버 도구·미디어 출력 형식을 지원하지 않습니다."
+        case .invalidRequest(let detail): L10n.format("provider.error.invalidRequest", table: "ProviderErrors", detail)
+        case .invalidStream(let detail): L10n.format("provider.error.invalidStream", table: "ProviderErrors", detail)
+        case .httpStatus(let status): L10n.format("provider.error.httpStatus", table: "ProviderErrors", String(status))
+        case .responseLimit: L10n.text("provider.error.responseLimit", table: "ProviderErrors")
+        case .incompleteStream: L10n.text("provider.error.incompleteStream", table: "ProviderErrors")
+        case .unsupportedContent: L10n.text("provider.error.unsupportedContent", table: "ProviderErrors")
         }
     }
 }

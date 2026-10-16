@@ -1,5 +1,6 @@
 import Darwin
 import Foundation
+import LatheLocalization
 
 public enum SocketTransportError: Error, LocalizedError, Sendable {
     case invalidPath(String), unsafePath(String), systemCall(String, Int32)
@@ -7,14 +8,14 @@ public enum SocketTransportError: Error, LocalizedError, Sendable {
 
     public var errorDescription: String? {
         switch self {
-        case .invalidPath(let path): "Unix socket 경로가 올바르지 않거나 너무 깁니다: \(path)"
-        case .unsafePath(let path): "현재 사용자 소유의 비공개 경로가 아닙니다: \(path)"
-        case .systemCall(let operation, let code): "\(operation): \(String(cString: strerror(code))) (\(code))"
-        case .frameTooLarge(let size): "IPC 프레임이 1 MiB 한도를 초과합니다: \(size)"
-        case .timeout: "IPC 작업이 5초 안에 완료되지 않았습니다."
-        case .disconnected: "IPC 연결이 완료 전에 닫혔습니다."
-        case .alreadyRunning: "해당 데이터 경로의 엔진이 이미 실행 중입니다."
-        case .launchFailed(let reason): "엔진을 시작할 수 없습니다: \(reason)"
+        case .invalidPath(let path): L10n.format("protocol.socket.invalidPath", table: "ProtocolErrors", path)
+        case .unsafePath(let path): L10n.format("protocol.socket.unsafePath", table: "ProtocolErrors", path)
+        case .systemCall(let operation, let code): L10n.format("protocol.socket.systemCall", table: "ProtocolErrors", operation, String(cString: strerror(code)), String(code))
+        case .frameTooLarge(let size): L10n.format("protocol.socket.frameTooLarge", table: "ProtocolErrors", size)
+        case .timeout: L10n.text("protocol.socket.timeout", table: "ProtocolErrors")
+        case .disconnected: L10n.text("protocol.socket.disconnected", table: "ProtocolErrors")
+        case .alreadyRunning: L10n.text("protocol.engine.alreadyRunning", table: "ProtocolErrors")
+        case .launchFailed(let reason): L10n.format("protocol.engine.launchFailed", table: "ProtocolErrors", reason)
         }
     }
 }
@@ -269,7 +270,7 @@ enum SocketIO {
         guard getpeereid(fd, &uid, &gid) == 0 else {
             throw SocketTransportError.systemCall("getpeereid", errno)
         }
-        guard uid == geteuid() else { throw SocketTransportError.unsafePath("peer uid \(uid)") }
+        guard uid == geteuid() else { throw SocketTransportError.unsafePath(L10n.format("protocol.socket.peerUID", table: "ProtocolErrors", String(uid))) }
     }
 
     static func connect(_ fd: Int32, path: String, deadline: UInt64) throws {

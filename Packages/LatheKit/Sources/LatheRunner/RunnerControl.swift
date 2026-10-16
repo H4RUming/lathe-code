@@ -1,5 +1,6 @@
 import Darwin
 import Foundation
+import LatheLocalization
 import LatheExecution
 
 /// stdin is the owner's control channel. EOF means owner loss, not target EOF.
@@ -58,25 +59,25 @@ final class RunnerControl: @unchecked Sendable {
                 var descriptor = pollfd(fd: STDIN_FILENO, events: Int16(POLLIN), revents: 0)
                 let ready = poll(&descriptor, 1, 100)
                 if ready == 0 || (ready < 0 && errno == EINTR) { continue }
-                guard ready > 0 else { throw RunnerFailure.io("poll owner", errno) }
+                guard ready > 0 else { let code = errno; throw RunnerFailure.io(L10n.text("control.operation.pollOwner", table: "RunnerMessages"), code) }
                 let count = Darwin.read(STDIN_FILENO, &buffer, buffer.count)
                 if count == 0 { runner.cancel(); return }
                 if count < 0 && errno == EINTR { continue }
-                guard count > 0 else { throw RunnerFailure.io("read owner", errno) }
+                guard count > 0 else { let code = errno; throw RunnerFailure.io(L10n.text("control.operation.readOwner", table: "RunnerMessages"), code) }
                 pending.append(contentsOf: buffer.prefix(count))
                 while let newline = pending.firstIndex(of: 10) {
                     let line = pending.prefix(upTo: newline)
-                    guard line.count <= 65_536 else { throw RunnerFailure.invalid("Control frame exceeds 64 KiB.") }
+                    guard line.count <= 65_536 else { throw RunnerFailure.invalid(L10n.text("control.frameLimit", table: "RunnerMessages")) }
                     let command = try JSONDecoder().decode(Control.self, from: line)
                     if isFinished { return }
                     do { try apply(command) }
                     catch CommandExecutionError.notRunning { return }
                     pending.removeSubrange(...newline)
                 }
-                guard pending.count <= 65_536 else { throw RunnerFailure.invalid("Control frame exceeds 64 KiB.") }
+                guard pending.count <= 65_536 else { throw RunnerFailure.invalid(L10n.text("control.frameLimit", table: "RunnerMessages")) }
             }
         } catch {
-            if !isFinished { fail("Control channel failed: \(error.localizedDescription)") }
+            if !isFinished { fail(L10n.format("control.channelFailed", table: "RunnerMessages", error.localizedDescription)) }
         }
     }
 
@@ -86,15 +87,15 @@ final class RunnerControl: @unchecked Sendable {
         case "eof": runner.closeInput()
         case "input":
             guard let encoded = control.data, let bytes = Data(base64Encoded: encoded) else {
-                throw RunnerFailure.invalid("input requires base64 data.")
+                throw RunnerFailure.invalid(L10n.text("control.base64Required", table: "RunnerMessages"))
             }
             try runner.writeInput(bytes)
         case "resize":
             guard let columns = control.columns, let rows = control.rows else {
-                throw RunnerFailure.invalid("resize requires columns and rows.")
+                throw RunnerFailure.invalid(L10n.text("control.dimensionsRequired", table: "RunnerMessages"))
             }
             try runner.resize(columns: columns, rows: rows)
-        default: throw RunnerFailure.invalid("Unknown runner control action.")
+        default: throw RunnerFailure.invalid(L10n.text("control.unknownAction", table: "RunnerMessages"))
         }
     }
 
@@ -103,14 +104,14 @@ final class RunnerControl: @unchecked Sendable {
         try data.withUnsafeBytes { bytes in
             var offset = 0
             while offset < bytes.count {
-                guard ContinuousClock.now < deadline else { throw RunnerFailure.invalid("Owner is not consuming runner events.") }
+                guard ContinuousClock.now < deadline else { throw RunnerFailure.invalid(L10n.text("control.consumerStalled", table: "RunnerMessages")) }
                 var descriptor = pollfd(fd: STDOUT_FILENO, events: Int16(POLLOUT), revents: 0)
                 let ready = poll(&descriptor, 1, 50)
                 if ready == 0 || (ready < 0 && errno == EINTR) { continue }
-                guard ready > 0 else { throw RunnerFailure.io("poll events", errno) }
+                guard ready > 0 else { let code = errno; throw RunnerFailure.io(L10n.text("control.operation.pollEvents", table: "RunnerMessages"), code) }
                 let count = Darwin.write(STDOUT_FILENO, bytes.baseAddress!.advanced(by: offset), bytes.count - offset)
                 if count < 0 && [EINTR, EAGAIN, EWOULDBLOCK].contains(errno) { continue }
-                guard count > 0 else { throw RunnerFailure.io("write events", errno) }
+                guard count > 0 else { let code = errno; throw RunnerFailure.io(L10n.text("control.operation.writeEvents", table: "RunnerMessages"), code) }
                 offset += count
             }
         }

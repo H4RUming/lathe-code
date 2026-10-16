@@ -1,0 +1,13 @@
+/* Fixed application errors; runtime values and external diagnostics remain unchanged. */
+"host.listener.ended" = "The app engine listener ended unexpectedly.";
+"host.operation.failed" = "Engine operation failed: %1$@";
+"host.protocol.unsupported" = "Protocol version %1$@ is not supported; expected %2$@.";
+"host.request.invalidEnvelope" = "Invalid JSON-RPC envelope.";
+"host.request.invalidJSON" = "Invalid JSON.";
+"host.request.invalidRPC" = "Invalid JSON-RPC request.";
+"host.request.missingParameter" = "Missing parameter: %1$@";
+"host.request.unknownMethod" = "Unknown engine method: %1$@";
+"host.response.encodingFailed" = "Could not encode the response.";
+"host.service.stopping" = "The engine host is stopping.";
+"host.start.runnerPath" = "An absolute file path to the runner is required.";
+"host.start.stopped" = "An app engine that is stopping or stopped cannot be restarted.";

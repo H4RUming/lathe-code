@@ -1,0 +1,17 @@
+/* Fixed application errors; runtime values and external diagnostics remain unchanged. */
+"protocol.engine.alreadyRunning" = "An engine is already running for this data directory.";
+"protocol.engine.incompatibleLegacy" = "The running legacy engine is incompatible. Stop it, then reconnect. Running work has not been stopped automatically.";
+"protocol.engine.incompatibleLegacyPID" = "The running legacy engine (PID %1$@) is incompatible. Stop it, then reconnect. Running work has not been stopped automatically.";
+"protocol.engine.launchFailed" = "Could not start the engine: %1$@";
+"protocol.launch.childExited" = "Child process status %1$@. Diagnostics: %2$@";
+"protocol.launch.notReady" = "The engine was not ready within 5 seconds. Diagnostics: %1$@";
+"protocol.launch.spawnAttributes" = "Could not initialize process spawn attributes.";
+"protocol.launch.spawnFileActions" = "Could not initialize process spawn file actions.";
+"protocol.response.malformed" = "The engine returned an invalid response.";
+"protocol.socket.disconnected" = "The IPC connection closed before the operation completed.";
+"protocol.socket.frameTooLarge" = "The IPC frame exceeds the 1 MiB limit: %1$ld";
+"protocol.socket.invalidPath" = "The Unix socket path is invalid or too long: %1$@";
+"protocol.socket.peerUID" = "Peer process UID %1$@";
+"protocol.socket.systemCall" = "%1$@: %2$@ (%3$@)";
+"protocol.socket.timeout" = "The IPC operation did not complete within 5 seconds.";
+"protocol.socket.unsafePath" = "The path is not private and owned by the current user: %1$@";

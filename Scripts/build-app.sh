@@ -54,10 +54,13 @@ if [[ "$developer_tools" = true ]]; then
     cp "$package_bin/lathe" "$output_directory/lathe"
     cp "$package_bin/lathe-engine" "$output_directory/lathe-engine"
     cp "$package_bin/lathe-runner" "$output_directory/lathe-runner"
+    # Optional executables must also work after being moved away from the build tree.
+    ditto "$package_bin/LatheKit_LatheLocalization.bundle" "$output_directory/LatheKit_LatheLocalization.bundle"
 else
     # A previous opt-in developer build must not leave separate executables in
     # the normal app distribution directory.
     rm -f "$output_directory/lathe" "$output_directory/lathe-engine" "$output_directory/lathe-runner"
+    rm -rf "$output_directory/LatheKit_LatheLocalization.bundle"
 fi
 codesign --verify --deep --strict "$output_directory/Lathe.app"
 echo "Built app: $output_directory/Lathe.app"

@@ -1,4 +1,5 @@
 import Foundation
+import LatheLocalization
 
 public enum RunState: String, Codable, Sendable {
     case running, completed, cancelled, interrupted, failed
@@ -93,7 +94,7 @@ public enum LatheError: Error, LocalizedError, Sendable {
     public var errorDescription: String? {
         switch self {
         case .invalidRequest(let s), .notFound(let s), .conflict(let s), .storage(let s), .transport(let s): s
-        case .incompatibleVersion(let version): "지원하지 않는 엔진 프로토콜 버전: \(version)"
+        case .incompatibleVersion(let version): L10n.format("domain.protocol.unsupported", table: "DomainErrors", String(version))
         }
     }
 }

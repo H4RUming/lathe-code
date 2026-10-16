@@ -2,6 +2,7 @@ import CSQLite
 import Darwin
 import Foundation
 import LatheDomain
+@testable import LatheLocalization
 import LathePersistence
 import Testing
 
@@ -231,6 +232,21 @@ struct AgentStorageTests {
         let link = fixture.root.appendingPathComponent("blob-link")
         try FileManager.default.createSymbolicLink(at: link, withDestinationURL: fixture.blobs)
         #expect(throws: LatheError.self) { try BlobStore(root: link) }
+    }
+
+    @Test(arguments: ["ko", "en"])
+    func missingBlobPreservesErrnoInLocalizedMessage(language: String) throws {
+        try L10n.$localeOverride.withValue(Locale(identifier: language)) {
+            let fixture = try AgentStorageFixture()
+            defer { fixture.cleanUp() }
+            let store = try BlobStore(root: fixture.blobs)
+            do {
+                _ = try store.read(String(repeating: "0", count: 64))
+                Issue.record("A nonexistent blob unexpectedly opened.")
+            } catch LatheError.storage(let message) {
+                #expect(message == L10n.format("storage.blob.openFileFailed", table: "StorageErrors", ENOENT))
+            }
+        }
     }
 
     @Test func concurrentBlobPublicationDeduplicatesWithoutPartialReads() async throws {

@@ -1,4 +1,5 @@
 import Foundation
+import LatheLocalization
 
 public protocol HTTPStreamingTransport: Sendable {
     /// Returning false stops the transport after an adapter-verified terminal event.
@@ -40,11 +41,11 @@ public struct URLSessionStreamingTransport: HTTPStreamingTransport {
     }
 
     static func validate(response: URLResponse, requestedURL: URL?) throws {
-        guard let http = response as? HTTPURLResponse else { throw ProviderError.invalidStream("HTTP 응답이 아닙니다.") }
-        guard http.url == requestedURL else { throw ProviderError.invalidStream("모델 endpoint redirect는 허용하지 않습니다.") }
+        guard let http = response as? HTTPURLResponse else { throw ProviderError.invalidStream(L10n.text("provider.http.notHTTP", table: "ProviderErrors")) }
+        guard http.url == requestedURL else { throw ProviderError.invalidStream(L10n.text("provider.http.redirectNotAllowed", table: "ProviderErrors")) }
         guard 200..<300 ~= http.statusCode else { throw ProviderError.httpStatus(http.statusCode) }
         guard http.mimeType?.lowercased() == "text/event-stream" else {
-            throw ProviderError.invalidStream("text/event-stream 응답이 필요합니다.")
+            throw ProviderError.invalidStream(L10n.text("provider.http.requiresEventStream", table: "ProviderErrors"))
         }
     }
 }

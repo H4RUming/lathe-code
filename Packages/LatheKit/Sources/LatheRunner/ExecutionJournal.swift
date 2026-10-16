@@ -1,5 +1,6 @@
 import Darwin
 import Foundation
+import LatheLocalization
 import LatheExecution
 
 struct RunnerRequest: Codable {
@@ -22,7 +23,7 @@ enum RunnerFailure: Error, LocalizedError {
     var errorDescription: String? {
         switch self {
         case .invalid(let message): message
-        case .io(let operation, let code): "\(operation): \(String(cString: strerror(code))) (\(code))"
+        case .io(let operation, let code): L10n.format("runner.ioFailure", table: "RunnerMessages", operation, String(cString: strerror(code)), String(code))
         }
     }
 }
@@ -47,24 +48,24 @@ final class ExecutionJournal: @unchecked Sendable {
 
     init(root: URL, command: CommandRequest) throws {
         guard root.path.hasPrefix("/"), !root.path.contains("\0") else {
-            throw RunnerFailure.invalid("--journal requires a fresh absolute directory path.")
+            throw RunnerFailure.invalid(L10n.text("journal.absolutePath", table: "RunnerMessages"))
         }
-        guard mkdir(root.path, 0o700) == 0 else { throw RunnerFailure.io("create journal directory", errno) }
+        guard mkdir(root.path, 0o700) == 0 else { let code = errno; throw RunnerFailure.io(L10n.text("journal.operation.createDirectory", table: "RunnerMessages"), code) }
         let directory = open(root.path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW)
-        guard directory >= 0 else { throw RunnerFailure.io("open journal directory", errno) }
+        guard directory >= 0 else { let code = errno; throw RunnerFailure.io(L10n.text("journal.operation.openDirectory", table: "RunnerMessages"), code) }
         directoryFD = directory
         let events = openat(directory, "events.ndjson", O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW, 0o600)
-        guard events >= 0 else { close(directory); throw RunnerFailure.io("create event journal", errno) }
+        guard events >= 0 else { let code = errno; close(directory); throw RunnerFailure.io(L10n.text("journal.operation.createEvents", table: "RunnerMessages"), code) }
         eventsFD = events
         do {
             // Environment values are deliberately absent from persistent receipts.
             let intent = Intent(invocationID: invocationID, command: command)
             try writeFile("intent.json", data: RunnerJSON.encode(intent))
-            guard fsync(directoryFD) == 0 else { throw RunnerFailure.io("sync journal directory", errno) }
+            guard fsync(directoryFD) == 0 else { let code = errno; throw RunnerFailure.io(L10n.text("journal.operation.syncDirectory", table: "RunnerMessages"), code) }
             let parent = open(root.deletingLastPathComponent().path, O_RDONLY | O_CLOEXEC)
-            guard parent >= 0 else { throw RunnerFailure.io("open journal parent", errno) }
+            guard parent >= 0 else { let code = errno; throw RunnerFailure.io(L10n.text("journal.operation.openParent", table: "RunnerMessages"), code) }
             defer { close(parent) }
-            guard fsync(parent) == 0 else { throw RunnerFailure.io("sync journal parent", errno) }
+            guard fsync(parent) == 0 else { let code = errno; throw RunnerFailure.io(L10n.text("journal.operation.syncParent", table: "RunnerMessages"), code) }
         }
     }
 
@@ -76,7 +77,7 @@ final class ExecutionJournal: @unchecked Sendable {
             var bytes = try RunnerJSON.encode(EventRecord(sequence: sequence, timestamp: Date(), event: event))
             bytes.append(10)
             try Self.writeAll(eventsFD, data: bytes)
-            guard fsync(eventsFD) == 0 else { throw RunnerFailure.io("sync event journal", errno) }
+            guard fsync(eventsFD) == 0 else { let code = errno; throw RunnerFailure.io(L10n.text("journal.operation.syncEvents", table: "RunnerMessages"), code) }
             return bytes
         }
     }
@@ -86,7 +87,7 @@ final class ExecutionJournal: @unchecked Sendable {
             let receipt = RunnerReceipt(protocolVersion: 1, invocationID: invocationID,
                                         status: error == nil ? "finished" : "failed", result: result, error: error)
             try writeFile("result.json", data: RunnerJSON.encode(receipt))
-            guard fsync(directoryFD) == 0 else { throw RunnerFailure.io("sync result directory", errno) }
+            guard fsync(directoryFD) == 0 else { let code = errno; throw RunnerFailure.io(L10n.text("journal.operation.syncResult", table: "RunnerMessages"), code) }
             return receipt
         }
     }
@@ -94,13 +95,13 @@ final class ExecutionJournal: @unchecked Sendable {
     private func writeFile(_ name: String, data: Data) throws {
         let temporary = ".\(name).\(UUID().uuidString).tmp"
         let fd = openat(directoryFD, temporary, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW, 0o600)
-        guard fd >= 0 else { throw RunnerFailure.io("create \(name)", errno) }
+        guard fd >= 0 else { let code = errno; throw RunnerFailure.io(L10n.format("journal.operation.createFile", table: "RunnerMessages", name), code) }
         defer { close(fd); unlinkat(directoryFD, temporary, 0) }
         try Self.writeAll(fd, data: data)
-        guard fsync(fd) == 0 else { throw RunnerFailure.io("sync \(name)", errno) }
+        guard fsync(fd) == 0 else { let code = errno; throw RunnerFailure.io(L10n.format("journal.operation.syncFile", table: "RunnerMessages", name), code) }
         // Publish the complete file atomically without replacing an earlier receipt.
         guard linkat(directoryFD, temporary, directoryFD, name, 0) == 0 else {
-            throw RunnerFailure.io("publish \(name)", errno)
+            let code = errno; throw RunnerFailure.io(L10n.format("journal.operation.publishFile", table: "RunnerMessages", name), code)
         }
     }
 
@@ -110,7 +111,7 @@ final class ExecutionJournal: @unchecked Sendable {
             while offset < bytes.count {
                 let count = Darwin.write(fd, bytes.baseAddress!.advanced(by: offset), bytes.count - offset)
                 if count < 0 && errno == EINTR { continue }
-                guard count > 0 else { throw RunnerFailure.io("write journal", errno) }
+                guard count > 0 else { let code = errno; throw RunnerFailure.io(L10n.text("journal.operation.write", table: "RunnerMessages"), code) }
                 offset += count
             }
         }

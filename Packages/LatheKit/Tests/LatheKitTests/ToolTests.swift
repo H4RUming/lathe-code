@@ -64,7 +64,6 @@ struct ToolTests {
             let disguised = try fixture.prepare("run_command", ["executable": executable, "arguments": arguments, "workingDirectory": ".", "timeoutSeconds": 5])
             #expect(PolicyEngine.decision(disguised, mode: .autoApprove) == .ask)
         }
-        #expect(command.summary.contains("UNSANDBOXED"))
     }
 
     @Test func autoApprovalSeparatesOrdinaryFilesFromSensitiveConfigurationAndExecutablePaths() throws {

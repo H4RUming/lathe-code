@@ -1,0 +1,13 @@
+/* Fixed application errors; runtime values and external diagnostics remain unchanged. */
+"host.listener.ended" = "앱 엔진의 listener가 예기치 않게 종료되었습니다.";
+"host.operation.failed" = "엔진 작업 실패: %1$@";
+"host.protocol.unsupported" = "프로토콜 버전 %1$@는 지원하지 않습니다. 필요한 버전: %2$@.";
+"host.request.invalidEnvelope" = "JSON-RPC 메시지 구조가 올바르지 않습니다.";
+"host.request.invalidJSON" = "JSON 형식이 올바르지 않습니다.";
+"host.request.invalidRPC" = "JSON-RPC 요청이 올바르지 않습니다.";
+"host.request.missingParameter" = "필수 매개변수가 없습니다: %1$@";
+"host.request.unknownMethod" = "알 수 없는 엔진 메서드: %1$@";
+"host.response.encodingFailed" = "응답을 인코딩할 수 없습니다.";
+"host.service.stopping" = "앱 엔진이 종료 중입니다.";
+"host.start.runnerPath" = "runner의 절대 파일 경로가 필요합니다.";
+"host.start.stopped" = "종료 중이거나 종료된 앱 엔진은 다시 시작할 수 없습니다.";

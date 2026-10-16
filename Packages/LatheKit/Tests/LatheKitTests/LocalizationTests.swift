@@ -27,6 +27,23 @@ struct LocalizationTests {
         #expect(["한국어", "English"].contains(expected))
     }
 
+    @Test func taskScopedLanguageOverridesAreIsolatedAndPropagatable() async {
+        await withTaskGroup(of: Void.self) { group in
+            for language in ["ko", "en"] {
+                group.addTask {
+                    L10n.$localeOverride.withValue(Locale(identifier: language)) {
+                        #expect(L10n.preferredLanguage == language)
+                        #expect(L10n.text("localization.language", table: "Localization") == (language == "ko" ? "한국어" : "English"))
+                        // A caller's explicit locale takes precedence over task context.
+                        #expect(L10n.text("localization.language", table: "Localization", locale: Locale(identifier: "en")) == "English")
+                    }
+                    #expect(L10n.localeOverride == nil)
+                }
+            }
+        }
+        #expect(L10n.localeOverride == nil)
+    }
+
     @Test func wholeSentenceFormattingSupportsReorderedArgumentsAndLiteralPercentValues() {
         let korean = Locale(identifier: "ko"), english = Locale(identifier: "en")
         #expect(L10n.format("localization.format", table: "Localization", locale: korean, "프로젝트", 3) == "프로젝트에 작업 3개가 있습니다.")

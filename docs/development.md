@@ -31,15 +31,29 @@ Swift 코드는 `L10n.text` 또는 `L10n.format`에 문장 대신 의미를 나�
 예를 들어 `app.error.connectionFailed`는 한국어와 영어의 전체 오류 안내 문장을 보유하며 원래 오류는
 `%@`로 삽입한다. 단어·문장 조각 연결로 어순을 고정하지 않는다.
 
-한국어·영어에 같은 key와 호환되는 placeholder를 유지하고 리소스를 앱 배포 번들에 포함한다.
-현재 현지화 범위는 앱 UI와 앱의 안내 문구다. 코어의 도구 요약·실행 결과, 개발 CLI·provider/protocol의 원시 진단,
-모델 prompt·응답·사용자 내용까지 번역했다고 주장하지 않는다. 원시 진단은 번역된 앱 안내에 그대로
-포함되므로 한 오류 카드 안에 언어가 섞일 수 있다. AppModel 회귀 검사는 한국어 부분 문자열 대신
-리소스로 만든 기대 문구를 비교하므로 실행 환경의 언어에 의존하지 않는다.
+코어에서 만드는 오류도 같은 리소스 경로를 사용한다. `DomainErrors`, `ProviderErrors`, `ProtocolErrors`,
+`HostErrors`, `StorageErrors`, `ExecutionErrors`는 검증·연결·저장·실행 오류를 담고, `RuntimeMessages`,
+`ToolMessages`, `RunnerMessages`, `CLIMessages`는 승인·복구·도구 요약·mock 응답·개발 도구 안내를 담는다.
+한국어·영어에 같은 key와 호환되는 placeholder를 유지한다. Foundation의 시스템/앱 언어 선택을 따르므로
+한국어로 표시되는 것 자체는 하드코딩을 뜻하지 않는다. 지원하지 않는 명시적 locale과 누락 번역은 한국어로
+fallback한다. 앱 안에서 언어를 바꾸는 설정 화면은 아직 없다.
+
+서버·OS·SQLite의 원문 진단, 사용자 입력, 모델 응답, 명령 출력, 모델용 지시문과 protocol 식별자는
+그대로 유지한다. errno·HTTP 상태·프로토콜 버전·PID 같은 진단값도 숫자 서식을 바꾸지 않고 전달한다.
+따라서 원문 진단의 언어는 앱과 다를 수 있다. DB의 기존 이벤트와 실행 결과는 생성 당시 문자열을
+보존하며, 언어 변경 후 과거 기록을 재번역하지 않는다.
+
+번역 번들은 `.app/Contents/Resources`에 하나만 포함한다. `Contents/Helpers/lathe-runner`도 이 번들을
+찾고 앱의 선택 언어를 전달받는다. 대상 명령의 환경은 변경하지 않는다. 선택적인 개발 빌드에만 실행 파일
+옆에 번역 번들을 추가하며, 기본 앱 빌드에서는 이 개발용 복사본을 제거한다.
 
 `python3 Scripts/check-localization.py`는 한국어·영어 table/key 일치, 중복 key, format 인자 타입,
-앱 호출의 누락 key와 고정 UI 문자열을 검사하며 CI에서도 실행한다. 현지화 변경 후 코어 88개와
-앱 모델 19개 테스트가 통과했고 125개 key, 실제 `.app`의 6개 번역 리소스와 지원 언어 선언을 확인했다.
+앱과 전체 Swift 코어 호출의 누락 key, 고정 UI 문구와 알려진 오류 표시 지점의 문자열을 검사한다.
+정적 검사는 Swift 컴파일러를 대신하지 않으므로 새 표시 API를 추가할 때 검사 범위도 확인한다.
+`Scripts/test-localization.py`는 영문·한글 오류 하드코딩을 실제로 거부하는지 검사한다.
+코어 테스트는 두 언어로 실제 오류를 발생시키며 진단값과 원문 보존도 확인한다.
+`Scripts/smoke-localization.py --bin-dir .build/macos`는 개발 빌드를 별도 임시 위치로 복사한 후,
+앱 내부 helper와 개발 도구의 두 언어 오류·도움말 및 번들 포함 여부를 확인한다. 이 검증들은 CI에서도 실행한다.
 
 ## 빌드
 

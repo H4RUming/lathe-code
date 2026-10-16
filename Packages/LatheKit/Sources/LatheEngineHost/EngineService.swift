@@ -1,4 +1,5 @@
 import Foundation
+import LatheLocalization
 import LatheDomain
 import LatheProtocol
 import LatheRuntime
@@ -26,7 +27,7 @@ actor EngineService {
     func handle(_ data: Data) async -> Data {
         guard accepting else {
             let id = (try? WireCodec.decode(RPCRequest.self, from: data))?.id
-            return encode(.init(id: id, error: .init(code: -32009, message: "Engine host is stopping.")))
+            return encode(.init(id: id, error: .init(code: -32009, message: L10n.text("host.service.stopping", table: "HostErrors"))))
         }
         activeRequests += 1
         defer {
@@ -43,12 +44,12 @@ actor EngineService {
             let validJSON = (try? JSONSerialization.jsonObject(with: data, options: .fragmentsAllowed)) != nil
             return encode(.init(id: nil, error: .init(
                 code: validJSON ? -32600 : -32700,
-                message: validJSON ? "Invalid JSON-RPC request." : "Invalid JSON."
+                message: validJSON ? L10n.text("host.request.invalidRPC", table: "HostErrors") : L10n.text("host.request.invalidJSON", table: "HostErrors")
             )))
         }
         do {
             guard request.jsonrpc == "2.0", !request.id.isEmpty, request.id.utf8.count <= 128 else {
-                throw RPCFailure(code: -32600, message: "Invalid JSON-RPC envelope.")
+                throw RPCFailure(code: -32600, message: L10n.text("host.request.invalidEnvelope", table: "HostErrors"))
             }
             guard request.params.protocolVersion == EngineProtocol.version else {
                 throw LatheError.incompatibleVersion(request.params.protocolVersion)
@@ -72,7 +73,7 @@ actor EngineService {
                 result = .init(invocation: try await runtime.decideApproval(invocationID: require(p.invocationID, "invocationID"), requestHash: require(p.requestHash, "requestHash"), approved: require(p.approved, "approved")))
             case "cancel": result = .init(run: try await runtime.cancel(runID: require(p.runID, "runID")))
             case "events": result = .init(page: try await runtime.events(after: p.cursor ?? 0, sessionID: p.sessionID, runID: p.runID, limit: p.limit ?? 256))
-            default: throw RPCFailure(code: -32601, message: "Unknown engine method: \(request.method.prefix(64))")
+            default: throw RPCFailure(code: -32601, message: L10n.format("host.request.unknownMethod", table: "HostErrors", String(request.method.prefix(64))))
             }
             return encode(.init(id: request.id, result: result))
         } catch {
@@ -82,20 +83,26 @@ actor EngineService {
             case LatheError.invalidRequest(let message): failure = .init(code: -32602, message: message)
             case LatheError.notFound(let message): failure = .init(code: -32004, message: message)
             case LatheError.conflict(let message): failure = .init(code: -32009, message: message)
-            case LatheError.incompatibleVersion(let version): failure = .init(code: -32001, message: "Protocol version \(version) is not supported; expected \(EngineProtocol.version).")
-            default: failure = .init(code: -32603, message: "Engine operation failed: \(error.localizedDescription)")
+            case LatheError.incompatibleVersion(let version): failure = .init(code: -32001, message: L10n.format("host.protocol.unsupported", table: "HostErrors", String(version), String(EngineProtocol.version)))
+            default: failure = .init(code: -32603, message: L10n.format("host.operation.failed", table: "HostErrors", error.localizedDescription))
             }
             return encode(.init(id: request.id, error: failure))
         }
     }
 
     private func require<T>(_ value: T?, _ name: String) throws -> T {
-        guard let value else { throw LatheError.invalidRequest("Missing parameter: \(name)") }
+        guard let value else { throw LatheError.invalidRequest(L10n.format("host.request.missingParameter", table: "HostErrors", name)) }
         return value
     }
 
     private func encode(_ response: RPCResponse) -> Data {
         // The fallback is valid JSON even when an unexpected encoding error occurs.
-        (try? WireCodec.encode(response)) ?? Data(#"{"jsonrpc":"2.0","id":null,"error":{"code":-32603,"message":"Encoding failed"}}"#.utf8)
+        if let encoded = try? WireCodec.encode(response) { return encoded }
+        let fallback: [String: Any] = ["jsonrpc": "2.0", "id": NSNull(),
+            "error": ["code": -32603, "message": L10n.text("host.response.encodingFailed", table: "HostErrors")]]
+        // JSONSerialization escapes the translated text; the final empty message
+        // is only a valid envelope for a second serialization failure.
+        return (try? JSONSerialization.data(withJSONObject: fallback)) ??
+            Data(#"{"jsonrpc":"2.0","id":null,"error":{"code":-32603,"message":""}}"#.utf8)
     }
 }

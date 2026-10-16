@@ -1,4 +1,5 @@
 import Foundation
+import LatheLocalization
 import LatheDomain
 
 public struct ModelClient: Sendable {
@@ -18,14 +19,14 @@ public struct ModelClient: Sendable {
     static func request(profile: ProviderProfile, credential: String?, messages: [ModelMessage], tools: [ToolDefinition]) throws -> URLRequest {
         try profile.validate()
         guard messages.count <= 1024, !messages.isEmpty, tools.count <= 64, Set(tools.map(\.name)).count == tools.count else {
-            throw ProviderError.invalidRequest("메시지 또는 도구 수가 유효하지 않습니다.")
+            throw ProviderError.invalidRequest(L10n.text("provider.request.invalidCounts", table: "ProviderErrors"))
         }
         var components = URLComponents(string: profile.baseURL)!
         let base = components.percentEncodedPath.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         let route = profile.api == .openAIResponses ? "responses" : "chat/completions"
         // base URL is the API root, including /v1 and any proxy prefix supplied by the user.
         components.percentEncodedPath = "/" + (base.isEmpty ? "" : base + "/") + route
-        guard let url = components.url else { throw ProviderError.invalidRequest("endpoint URL을 만들 수 없습니다.") }
+        guard let url = components.url else { throw ProviderError.invalidRequest(L10n.text("provider.request.endpointURL", table: "ProviderErrors")) }
         var body: [String: Any] = ["model": profile.model, "stream": true]
         let functions: [[String: Any]] = try tools.map { tool in
             guard !tool.name.isEmpty, tool.name.utf8.count <= 64,
@@ -33,7 +34,7 @@ public struct ModelClient: Sendable {
                   tool.description.utf8.count <= 8192, tool.parametersJSON.utf8.count <= 65536,
                   let schema = try JSONSerialization.jsonObject(with: Data(tool.parametersJSON.utf8)) as? [String: Any],
                   schema["type"] as? String == "object" else {
-                throw ProviderError.invalidRequest("도구 정의가 유효하지 않습니다.")
+                throw ProviderError.invalidRequest(L10n.text("provider.request.invalidToolDefinition", table: "ProviderErrors"))
             }
             return ["name": tool.name, "description": tool.description, "parameters": schema, "strict": false]
         }
@@ -49,7 +50,7 @@ public struct ModelClient: Sendable {
             if let effort = profile.reasoningEffort { body["reasoning_effort"] = effort }
         }
         let data = try JSONSerialization.data(withJSONObject: body, options: [.sortedKeys])
-        guard data.count <= 4 * 1024 * 1024 else { throw ProviderError.invalidRequest("요청 context가 4 MiB 한도를 초과했습니다.") }
+        guard data.count <= 4 * 1024 * 1024 else { throw ProviderError.invalidRequest(L10n.text("provider.request.contextLimit", table: "ProviderErrors")) }
         var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 30)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -57,7 +58,7 @@ public struct ModelClient: Sendable {
         if let credential {
             guard !credential.isEmpty, credential.utf8.count <= 16384,
                   !credential.contains(where: { $0.isNewline || $0.asciiValue == 0 }) else {
-                throw ProviderError.invalidRequest("API key 형식이 유효하지 않습니다.")
+                throw ProviderError.invalidRequest(L10n.text("provider.request.invalidAPIKey", table: "ProviderErrors"))
             }
             request.setValue("Bearer " + credential, forHTTPHeaderField: "Authorization")
         }
@@ -67,7 +68,7 @@ public struct ModelClient: Sendable {
 
     private static func check(_ state: ModelContinuation, profile: ProviderProfile) throws {
         guard state.api == profile.api, state.baseURL == profile.baseURL, state.model == profile.model else {
-            throw ProviderError.invalidRequest("다른 연결이나 모델의 continuation을 재사용할 수 없습니다.")
+            throw ProviderError.invalidRequest(L10n.text("provider.continuation.connectionMismatch", table: "ProviderErrors"))
         }
     }
 
@@ -84,11 +85,11 @@ public struct ModelClient: Sendable {
                     try check(state, profile: profile)
                     guard state.payload.count <= 8 * 1024 * 1024,
                           let items = try JSONSerialization.jsonObject(with: state.payload) as? [[String: Any]] else {
-                        throw ProviderError.invalidRequest("Responses continuation 형식이 유효하지 않습니다.")
+                        throw ProviderError.invalidRequest(L10n.text("provider.continuation.invalidResponses", table: "ProviderErrors"))
                     }
                     result.append(contentsOf: items)
                 } else {
-                    guard step.calls.isEmpty else { throw ProviderError.invalidRequest("도구 호출의 원본 Responses 출력이 없습니다.") }
+                    guard step.calls.isEmpty else { throw ProviderError.invalidRequest(L10n.text("provider.continuation.missingResponsesOutput", table: "ProviderErrors")) }
                     result.append(["role": "assistant", "content": step.text])
                 }
             }
@@ -108,7 +109,7 @@ public struct ModelClient: Sendable {
                     guard state.payload.count <= 8 * 1024 * 1024,
                           let item = try JSONSerialization.jsonObject(with: state.payload) as? [String: Any],
                           item["role"] as? String == "assistant" else {
-                        throw ProviderError.invalidRequest("Chat continuation 형식이 유효하지 않습니다.")
+                        throw ProviderError.invalidRequest(L10n.text("provider.continuation.invalidChat", table: "ProviderErrors"))
                     }
                     return item
                 }

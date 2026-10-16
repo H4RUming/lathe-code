@@ -1,4 +1,5 @@
 import Foundation
+import LatheLocalization
 
 public enum PermissionMode: String, Codable, CaseIterable, Sendable {
     case fullAccess, autoApprove, acceptEdits, requestApproval
@@ -12,7 +13,7 @@ public enum PermissionMode: String, Codable, CaseIterable, Sendable {
         case "manual", "plan", "dontAsk": self = .requestApproval
         default:
             guard let mode = Self(rawValue: value) else {
-                throw DecodingError.dataCorruptedError(in: container, debugDescription: "Unknown permission mode: \(value)")
+                throw DecodingError.dataCorruptedError(in: container, debugDescription: L10n.format("domain.permission.unknown", table: "DomainErrors", value))
             }
             self = mode
         }

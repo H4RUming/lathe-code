@@ -1,4 +1,5 @@
 import Foundation
+import LatheLocalization
 import LatheDomain
 
 /// GUI and CLI use this client; reconnecting never resubmits a prompt.
@@ -18,8 +19,10 @@ public actor EngineClient {
         do { result = try await call("handshake") }
         catch let error as RPCFailure where error.code == -32001 {
             let legacy = try? await call("handshake", params: .init(protocolVersion: 1))
-            let identity = legacy?.info.map { " (PID \($0.processID))" } ?? ""
-            throw LatheError.transport("실행 중인 이전 엔진\(identity)과 호환되지 않습니다. 기존 엔진을 종료한 뒤 다시 연결하세요. 실행 중인 작업은 자동으로 종료하지 않았습니다.")
+            if let pid = legacy?.info?.processID {
+                throw LatheError.transport(L10n.format("protocol.engine.incompatibleLegacyPID", table: "ProtocolErrors", String(pid)))
+            }
+            throw LatheError.transport(L10n.text("protocol.engine.incompatibleLegacy", table: "ProtocolErrors"))
         }
         guard let info = result.info else { throw malformedResponse() }
         guard info.protocolVersion == EngineProtocol.version else {
@@ -113,6 +116,6 @@ public actor EngineClient {
     }
 
     private func malformedResponse() -> LatheError {
-        .transport("엔진이 올바르지 않은 응답을 반환했습니다.")
+        .transport(L10n.text("protocol.response.malformed", table: "ProtocolErrors"))
     }
 }

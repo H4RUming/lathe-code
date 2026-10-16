@@ -1,0 +1,18 @@
+// Fixed execution and tool messages. Protocol fields and original output stay unchanged.
+"execution.absolutePaths" = "executable and workingDirectory must be absolute paths";
+"execution.alreadyUsed" = "A ProcessRunner can execute only one command";
+"execution.environmentKeys" = "environment keys must be nonempty and contain no equals sign";
+"execution.inputClosed" = "Command input is closed";
+"execution.inputLimit" = "Pending command input exceeds 1 MiB";
+"execution.invalidBounds" = "invalid timeout, grace period, output bound or terminal dimensions";
+"execution.noNUL" = "paths, arguments and environment must not contain NUL";
+"execution.notRunning" = "The command is not running";
+"execution.readOutputOperation" = "read command output";
+"execution.resizeOperation" = "resize PTY";
+"execution.resizeRequiresPTY" = "resize requires PTY mode";
+"execution.systemCall" = "%1$@ failed (errno %2$@)";
+"execution.terminalDimensions" = "terminal dimensions must be between 1 and 65535";
+"execution.reason.exited" = "Exited";
+"execution.reason.cancelled" = "Cancelled";
+"execution.reason.timedOut" = "Timed out";
+"execution.reason.outputLimit" = "Output limit exceeded";

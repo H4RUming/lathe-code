@@ -1,6 +1,7 @@
 import CLatheExecution
 import Darwin
 import Foundation
+import LatheLocalization
 
 /// Executes one explicitly configured command in a private process session.
 /// Callbacks run serially on a dedicated worker, outside the control-state lock.
@@ -61,11 +62,11 @@ public final class ProcessRunner: @unchecked Sendable {
 
     public func resize(columns: Int, rows: Int) throws {
         guard (1...65_535).contains(columns), (1...65_535).contains(rows) else {
-            throw CommandExecutionError.invalidRequest("terminal dimensions must be between 1 and 65535")
+            throw CommandExecutionError.invalidRequest(L10n.text("execution.terminalDimensions", table: "ExecutionErrors"))
         }
         try lock.withLock {
             guard state == .running || state == .starting else { throw CommandExecutionError.notRunning }
-            guard terminalMode else { throw CommandExecutionError.invalidRequest("resize requires PTY mode") }
+            guard terminalMode else { throw CommandExecutionError.invalidRequest(L10n.text("execution.resizeRequiresPTY", table: "ExecutionErrors")) }
             pendingResize = (columns, rows)
         }
     }
@@ -132,7 +133,7 @@ public final class ProcessRunner: @unchecked Sendable {
                 let resize = lock.withLock { let value = pendingResize; pendingResize = nil; return value }
                 if let resize {
                     let status = lathe_resize_terminal(child.output_fd, UInt16(resize.columns), UInt16(resize.rows))
-                    if status != 0 { workerError = .systemCall("resize PTY", status); beginCleanup(now) }
+                    if status != 0 { workerError = .systemCall(L10n.text("execution.resizeOperation", table: "ExecutionErrors"), status); beginCleanup(now) }
                 }
             }
             if inputOpen {
@@ -188,7 +189,7 @@ public final class ProcessRunner: @unchecked Sendable {
                         break
                     } else if readCount < 0 && errno == EINTR { continue }
                     else if readCount < 0 && errno != EAGAIN {
-                        workerError = .systemCall("read command output", errno); beginCleanup(now)
+                        let code = errno; workerError = .systemCall(L10n.text("execution.readOutputOperation", table: "ExecutionErrors"), code); beginCleanup(now)
                         break
                     } else { break }
                 }

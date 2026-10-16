@@ -1,5 +1,6 @@
 import Darwin
 import Foundation
+import LatheLocalization
 import LatheDomain
 import LatheProtocol
 import LatheEngineHost
@@ -10,7 +11,7 @@ struct LatheEngineMain {
         do {
             let args = Array(CommandLine.arguments.dropFirst())
             guard args.count == 2, args[0] == "--root", args[1].hasPrefix("/") else {
-                throw LatheError.invalidRequest("Developer harness usage: lathe-engine --root /absolute/test/data/directory")
+                throw LatheError.invalidRequest(L10n.text("engine.usage", table: "CLIMessages"))
             }
             let root = URL(fileURLWithPath: args[1], isDirectory: true)
             let paths = try EnginePaths(root: root)
@@ -30,7 +31,7 @@ struct LatheEngineMain {
             try await host.start()
             try await host.waitUntilStopped()
         } catch {
-            FileHandle.standardError.write(Data("lathe-engine: \(error.localizedDescription)\n".utf8))
+            FileHandle.standardError.write(Data(L10n.format("engine.error", table: "CLIMessages", error.localizedDescription).utf8))
             exit(1)
         }
     }

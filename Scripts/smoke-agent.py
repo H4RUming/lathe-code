@@ -18,6 +18,7 @@ import tempfile
 import threading
 import time
 import uuid
+from localization_resources import translations
 
 
 def encode(value):
@@ -115,7 +116,7 @@ class FixtureServer(ThreadingHTTPServer):
                 path = ".env" if scenario == "auto-sensitive" else scenario + ".txt"
                 return chat_tool("write_file", {"path": path, "content": "must not exist", "expectedSHA256": "missing"}, scenario + "_write")
             assert len(results) == 1
-            assert "거절" in results[0]["content"]
+            assert results[0]["content"] in translations("RuntimeMessages", "runtime.approval.userDenied")
             return chat_final("Permission denial was preserved.")
         if scenario in {"deny-read", "auto-sensitive-read", "auto-command"}:
             if not results:
@@ -123,7 +124,7 @@ class FixtureServer(ThreadingHTTPServer):
                     return chat_tool("run_command", command("/bin/sh", ["-c", "printf no > unexpected.txt"]), "review_command")
                 path = ".env" if scenario == "auto-sensitive-read" else "source.txt"
                 return chat_tool("read_file", {"path": path}, "review_read")
-            assert len(results) == 1 and "거절" in results[0]["content"]
+            assert len(results) == 1 and results[0]["content"] in translations("RuntimeMessages", "runtime.approval.userDenied")
             assert "before" not in results[0]["content"] and "fixture-secret" not in results[0]["content"]
             return chat_final("Denied tool content was not disclosed.")
         if scenario == "truncated":
@@ -310,7 +311,8 @@ def main():
                 decide(write)
                 shell = pending(run, "run_command")
                 assert (workspace / "source.txt").read_text() == "after 🌿\n"
-                assert "UNSANDBOXED" in shell["summary"]
+                assert any(shell["summary"].startswith(value.split("%", 1)[0])
+                           for value in translations("ToolMessages", "tool.summary.command"))
                 decide(shell)
                 result = complete(run)
                 assert result["response"] == "파일 수정과 명령 실행을 확인했습니다 🌿"

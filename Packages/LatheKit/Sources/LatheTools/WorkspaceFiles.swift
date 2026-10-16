@@ -1,5 +1,6 @@
 import Darwin
 import Foundation
+import LatheLocalization
 
 struct FileIdentity: Equatable, Sendable, CustomStringConvertible {
     let device: Int32
@@ -19,15 +20,15 @@ final class WorkspaceFiles {
     init(root: URL, protectedPaths: [URL]) throws {
         self.root = root
         self.protectedPaths = protectedPaths.map { $0.path.lowercased() }
-        guard !root.pathComponents.contains(where: { $0.lowercased() == ".git" }) else { throw ToolError.denied("A .git directory cannot be a file-tool workspace.") }
+        guard !root.pathComponents.contains(where: { $0.lowercased() == ".git" }) else { throw ToolError.denied(L10n.text("workspace.gitRoot", table: "ToolMessages")) }
         let candidate = root.path.lowercased()
         guard !self.protectedPaths.contains(where: { candidate == $0 || candidate.hasPrefix($0 + "/") }) else {
-            throw ToolError.denied("The workspace overlaps protected engine data.")
+            throw ToolError.denied(L10n.text("workspace.protectedOverlap", table: "ToolMessages"))
         }
         let fd = open(root.path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
-        guard fd >= 0 else { throw ToolError.io("open workspace", errno) }
+        guard fd >= 0 else { let code = errno; throw ToolError.io(L10n.text("workspace.operation.open", table: "ToolMessages"), code) }
         var info = stat()
-        guard fstat(fd, &info) == 0 else { let code = errno; close(fd); throw ToolError.io("stat workspace", code) }
+        guard fstat(fd, &info) == 0 else { let code = errno; close(fd); throw ToolError.io(L10n.text("workspace.operation.stat", table: "ToolMessages"), code) }
         rootFD = fd; identity = FileIdentity(info)
     }
     deinit { close(rootFD) }
@@ -35,14 +36,14 @@ final class WorkspaceFiles {
     func validate(_ input: String, allowRoot: Bool = false) throws -> String {
         if input == ".", allowRoot { return input }
         guard !input.isEmpty, !input.hasPrefix("/"), !input.utf8.contains(0), input.utf8.count <= 4096 else {
-            throw ToolError.denied("Tool paths must be nonempty workspace-relative paths.")
+            throw ToolError.denied(L10n.text("workspace.relativePath", table: "ToolMessages"))
         }
         let components = input.split(separator: "/", omittingEmptySubsequences: false)
         guard components.allSatisfy({ !$0.isEmpty && $0 != "." && $0 != ".." && $0.lowercased() != ".git" }) else {
-            throw ToolError.denied("Path traversal, empty components and .git access are forbidden.")
+            throw ToolError.denied(L10n.text("workspace.forbiddenPath", table: "ToolMessages"))
         }
         guard !isProtected(root.appendingPathComponent(input).path) else {
-            throw ToolError.denied("Engine state, credentials and execution records are protected.")
+            throw ToolError.denied(L10n.text("workspace.protectedData", table: "ToolMessages"))
         }
         return input
     }
@@ -52,7 +53,7 @@ final class WorkspaceFiles {
     func directoryIdentity(_ path: String) throws -> FileIdentity {
         let fd = try directory(path); defer { close(fd) }
         var info = stat()
-        guard fstat(fd, &info) == 0 else { throw ToolError.io("stat working directory", errno) }
+        guard fstat(fd, &info) == 0 else { let code = errno; throw ToolError.io(L10n.text("workspace.operation.workingDirectory", table: "ToolMessages"), code) }
         return FileIdentity(info)
     }
 
@@ -63,10 +64,10 @@ final class WorkspaceFiles {
         var info = stat()
         guard fstatat(parent, name, &info, AT_SYMLINK_NOFOLLOW) == 0 else {
             if errno == ENOENT, allowMissing { return (false, false) }
-            throw ToolError.io("inspect file without reading", errno)
+            let code = errno; throw ToolError.io(L10n.text("workspace.operation.inspect", table: "ToolMessages"), code)
         }
         guard info.st_mode & S_IFMT == S_IFREG, info.st_nlink == 1 else {
-            throw ToolError.denied("Only regular files with one hard link can be read or replaced.")
+            throw ToolError.denied(L10n.text("workspace.regularFile", table: "ToolMessages"))
         }
         return (info.st_mode & 0o111 != 0, true)
     }
@@ -83,13 +84,13 @@ final class WorkspaceFiles {
 
     func list(_ path: String) throws -> [[String: String]] {
         let fd = try directory(path)
-        guard let stream = fdopendir(fd) else { let code = errno; close(fd); throw ToolError.io("list directory", code) }
+        guard let stream = fdopendir(fd) else { let code = errno; close(fd); throw ToolError.io(L10n.text("workspace.operation.list", table: "ToolMessages"), code) }
         defer { closedir(stream) }
         var entries: [[String: String]] = []
         while true {
             errno = 0
             guard let entry = readdir(stream) else {
-                if errno != 0 { throw ToolError.io("read directory entry", errno) }
+                if errno != 0 { let code = errno; throw ToolError.io(L10n.text("workspace.operation.readEntry", table: "ToolMessages"), code) }
                 break
             }
             let name = withUnsafePointer(to: &entry.pointee.d_name) { pointer in
@@ -98,9 +99,9 @@ final class WorkspaceFiles {
             if name == "." || name == ".." || name.lowercased() == ".git" { continue }
             let relative = path == "." ? name : path + "/" + name
             if isProtected(root.appendingPathComponent(relative).path) { continue }
-            guard entries.count < 2000 else { throw ToolError.invalid("Directory exceeds 2,000 entries; choose a smaller subdirectory.") }
+            guard entries.count < 2000 else { throw ToolError.invalid(L10n.text("workspace.directoryLimit", table: "ToolMessages")) }
             var info = stat()
-            guard fstatat(fd, name, &info, AT_SYMLINK_NOFOLLOW) == 0 else { throw ToolError.io("stat directory entry", errno) }
+            guard fstatat(fd, name, &info, AT_SYMLINK_NOFOLLOW) == 0 else { let code = errno; throw ToolError.io(L10n.text("workspace.operation.statEntry", table: "ToolMessages"), code) }
             let kind: String
             switch info.st_mode & S_IFMT {
             case S_IFDIR: kind = "directory"
@@ -123,62 +124,62 @@ final class WorkspaceFiles {
         }()
         let temporary = ".lathe-write-\(UUID().uuidString)"
         let fd = openat(parent, temporary, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, mode)
-        guard fd >= 0 else { throw ToolError.io("create atomic write", errno) }
+        guard fd >= 0 else { let code = errno; throw ToolError.io(L10n.text("workspace.operation.createAtomicWrite", table: "ToolMessages"), code) }
         defer { close(fd); unlinkat(parent, temporary, 0) }
         try content.withUnsafeBytes { buffer in
             var offset = 0
             while offset < buffer.count {
                 let count = Darwin.write(fd, buffer.baseAddress!.advanced(by: offset), buffer.count - offset)
                 if count < 0 && errno == EINTR { continue }
-                guard count > 0 else { throw ToolError.io("write file", errno) }
+                guard count > 0 else { let code = errno; throw ToolError.io(L10n.text("workspace.operation.write", table: "ToolMessages"), code) }
                 offset += count
             }
         }
-        guard fchmod(fd, mode) == 0, fsync(fd) == 0 else { throw ToolError.io("sync file", errno) }
+        guard fchmod(fd, mode) == 0, fsync(fd) == 0 else { let code = errno; throw ToolError.io(L10n.text("workspace.operation.sync", table: "ToolMessages"), code) }
         try Task.checkCancellation()
         _ = try checkPrecondition(parent: parent, name: name, expected: expected)
         if expected == "missing" {
             guard linkat(parent, temporary, parent, name, 0) == 0 else {
-                if errno == EEXIST { throw ToolError.preconditionChanged("The file appeared after preparation.") }
-                throw ToolError.io("publish new file", errno)
+                if errno == EEXIST { throw ToolError.preconditionChanged(L10n.text("workspace.appeared", table: "ToolMessages")) }
+                let code = errno; throw ToolError.io(L10n.text("workspace.operation.publish", table: "ToolMessages"), code)
             }
         } else {
-            guard renameat(parent, temporary, parent, name) == 0 else { throw ToolError.io("replace file", errno) }
+            guard renameat(parent, temporary, parent, name) == 0 else { let code = errno; throw ToolError.io(L10n.text("workspace.operation.replace", table: "ToolMessages"), code) }
         }
         guard fsync(parent) == 0 else {
-            throw ToolError.executionUnknown("File replacement occurred, but syncing its directory failed (errno \(errno)).")
+            throw ToolError.executionUnknown(L10n.format("workspace.syncAfterWrite", table: "ToolMessages", String(errno)))
         }
     }
 
     private func checkPrecondition(parent: Int32, name: String, expected: String) throws -> Data? {
         if expected == "missing" {
             var info = stat()
-            if fstatat(parent, name, &info, AT_SYMLINK_NOFOLLOW) == 0 { throw ToolError.preconditionChanged("The file already exists; read its current SHA-256 before replacing it.") }
-            guard errno == ENOENT else { throw ToolError.io("check new file", errno) }
+            if fstatat(parent, name, &info, AT_SYMLINK_NOFOLLOW) == 0 { throw ToolError.preconditionChanged(L10n.text("workspace.alreadyExists", table: "ToolMessages")) }
+            guard errno == ENOENT else { let code = errno; throw ToolError.io(L10n.text("workspace.operation.checkNew", table: "ToolMessages"), code) }
             return nil
         }
         let data = try read(parent: parent, name: name)
-        guard ToolBroker.digest(data) == expected else { throw ToolError.preconditionChanged("File content changed; read it again before writing.") }
+        guard ToolBroker.digest(data) == expected else { throw ToolError.preconditionChanged(L10n.text("workspace.contentChanged", table: "ToolMessages")) }
         return data
     }
 
     private func read(parent: Int32, name: String) throws -> Data {
         let fd = openat(parent, name, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC)
-        guard fd >= 0 else { throw ToolError.io("open file without following links", errno) }
+        guard fd >= 0 else { let code = errno; throw ToolError.io(L10n.text("workspace.operation.openNoLinks", table: "ToolMessages"), code) }
         defer { close(fd) }
         var info = stat()
-        guard fstat(fd, &info) == 0 else { throw ToolError.io("stat file", errno) }
+        guard fstat(fd, &info) == 0 else { let code = errno; throw ToolError.io(L10n.text("workspace.operation.statFile", table: "ToolMessages"), code) }
         guard info.st_mode & S_IFMT == S_IFREG, info.st_nlink == 1 else {
-            throw ToolError.denied("Only regular files with one hard link can be read or replaced.")
+            throw ToolError.denied(L10n.text("workspace.regularFile", table: "ToolMessages"))
         }
-        guard info.st_size <= ToolBroker.fileLimit else { throw ToolError.invalid("File exceeds 256 KiB.") }
+        guard info.st_size <= ToolBroker.fileLimit else { throw ToolError.invalid(L10n.text("workspace.fileLimit", table: "ToolMessages")) }
         var result = Data(), buffer = [UInt8](repeating: 0, count: 16_384)
         while true {
             let count = Darwin.read(fd, &buffer, buffer.count)
             if count < 0 && errno == EINTR { continue }
-            guard count >= 0 else { throw ToolError.io("read file", errno) }
+            guard count >= 0 else { let code = errno; throw ToolError.io(L10n.text("workspace.operation.read", table: "ToolMessages"), code) }
             if count == 0 { break }
-            guard count <= ToolBroker.fileLimit - result.count else { throw ToolError.invalid("File exceeds 256 KiB.") }
+            guard count <= ToolBroker.fileLimit - result.count else { throw ToolError.invalid(L10n.text("workspace.fileLimit", table: "ToolMessages")) }
             result.append(contentsOf: buffer.prefix(count))
         }
         return result
@@ -187,13 +188,13 @@ final class WorkspaceFiles {
     private func directory(_ path: String) throws -> Int32 {
         _ = try validate(path, allowRoot: true)
         var current = fcntl(rootFD, F_DUPFD_CLOEXEC, 0)
-        guard current >= 0 else { throw ToolError.io("duplicate workspace descriptor", errno) }
+        guard current >= 0 else { let code = errno; throw ToolError.io(L10n.text("workspace.operation.duplicateDescriptor", table: "ToolMessages"), code) }
         if path == "." { return current }
         for component in path.split(separator: "/") {
             let next = openat(current, String(component), O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
             let code = errno
             close(current)
-            guard next >= 0 else { throw ToolError.io("open directory without following links", code) }
+            guard next >= 0 else { throw ToolError.io(L10n.text("workspace.operation.openDirectoryNoLinks", table: "ToolMessages"), code) }
             current = next
         }
         return current

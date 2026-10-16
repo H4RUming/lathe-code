@@ -1,0 +1,18 @@
+// Fixed execution and tool messages. Protocol fields and original output stay unchanged.
+"execution.absolutePaths" = "executable과 workingDirectory는 절대 경로여야 합니다.";
+"execution.alreadyUsed" = "ProcessRunner는 명령 하나만 실행할 수 있습니다.";
+"execution.environmentKeys" = "환경 변수 이름은 비어 있으면 안 되며 등호를 포함할 수 없습니다.";
+"execution.inputClosed" = "명령 입력이 닫혔습니다.";
+"execution.inputLimit" = "대기 중인 명령 입력이 1 MiB를 초과합니다.";
+"execution.invalidBounds" = "제한 시간, 종료 유예 시간, 출력 한도 또는 터미널 크기가 올바르지 않습니다.";
+"execution.noNUL" = "경로, 인수, 환경 변수에는 NUL 문자를 넣을 수 없습니다.";
+"execution.notRunning" = "명령이 실행 중이 아닙니다.";
+"execution.readOutputOperation" = "명령 출력 읽기";
+"execution.resizeOperation" = "PTY 크기 변경";
+"execution.resizeRequiresPTY" = "터미널 크기를 변경하려면 PTY 모드가 필요합니다.";
+"execution.systemCall" = "%1$@ 실패(errno %2$@)";
+"execution.terminalDimensions" = "터미널의 열과 행은 각각 1~65535여야 합니다.";
+"execution.reason.exited" = "종료됨";
+"execution.reason.cancelled" = "취소됨";
+"execution.reason.timedOut" = "시간 초과";
+"execution.reason.outputLimit" = "출력 한도 초과";

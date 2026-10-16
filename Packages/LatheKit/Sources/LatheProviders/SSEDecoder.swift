@@ -1,4 +1,5 @@
 import Foundation
+import LatheLocalization
 
 /// Incremental SSE framing. UTF-8 is decoded only after a complete line, so a
 /// multibyte scalar may be split across any number of transport chunks.
@@ -29,7 +30,7 @@ struct SSEDecoder {
     }
 
     private mutating func consumeLine() throws -> String? {
-        guard var text = String(data: line, encoding: .utf8) else { throw ProviderError.invalidStream("유효하지 않은 UTF-8입니다.") }
+        guard var text = String(data: line, encoding: .utf8) else { throw ProviderError.invalidStream(L10n.text("provider.stream.invalidUTF8", table: "ProviderErrors")) }
         line.removeAll(keepingCapacity: true)
         if firstLine { firstLine = false; if text.first == "\u{feff}" { text.removeFirst() } }
         if text.isEmpty {

@@ -1,4 +1,5 @@
 import Foundation
+import LatheLocalization
 
 /// Frozen per run. A nil profile selects the deterministic mock; credentials
 /// are deliberately excluded from run snapshots and the idempotency payload.
@@ -17,7 +18,7 @@ public struct RunConfiguration: Codable, Sendable, Equatable {
     public func validate() throws {
         guard (1...24).contains(maxSteps), approvalTimeoutSeconds.isFinite,
               (1...600).contains(approvalTimeoutSeconds) else {
-            throw LatheError.invalidRequest("실행 단계는 1~24, 승인 대기는 1~600초여야 합니다.")
+            throw LatheError.invalidRequest(L10n.text("domain.run.invalidLimits", table: "DomainErrors"))
         }
         try profile?.validate()
     }

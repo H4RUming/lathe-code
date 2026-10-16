@@ -1,5 +1,6 @@
 import Darwin
 import Foundation
+import LatheLocalization
 
 /// Acquire before opening the database. This owner controls the lifetime lease.
 public final class EngineLease: @unchecked Sendable {
@@ -75,11 +76,11 @@ public enum EngineBootstrap {
             }
             while try !isReady(paths: paths, deadline: deadline) {
                 if let status = child?.status {
-                    throw SocketTransportError.launchFailed("child status \(status). 진단: \(startupLog(paths).path)")
+                    throw SocketTransportError.launchFailed(L10n.format("protocol.launch.childExited", table: "ProtocolErrors", String(status), startupLog(paths).path))
                 }
                 do { try pause(until: deadline) }
                 catch {
-                    throw SocketTransportError.launchFailed("5초 동안 준비되지 않았습니다. 진단: \(startupLog(paths).path)")
+                    throw SocketTransportError.launchFailed(L10n.format("protocol.launch.notReady", table: "ProtocolErrors", startupLog(paths).path))
                 }
             }
         }
@@ -109,9 +110,9 @@ public enum EngineBootstrap {
         }
         var attributes: posix_spawnattr_t?
         var actions: posix_spawn_file_actions_t?
-        guard posix_spawnattr_init(&attributes) == 0 else { throw SocketTransportError.launchFailed("spawn attributes") }
+        guard posix_spawnattr_init(&attributes) == 0 else { throw SocketTransportError.launchFailed(L10n.text("protocol.launch.spawnAttributes", table: "ProtocolErrors")) }
         defer { posix_spawnattr_destroy(&attributes) }
-        guard posix_spawn_file_actions_init(&actions) == 0 else { throw SocketTransportError.launchFailed("spawn file actions") }
+        guard posix_spawn_file_actions_init(&actions) == 0 else { throw SocketTransportError.launchFailed(L10n.text("protocol.launch.spawnFileActions", table: "ProtocolErrors")) }
         defer { posix_spawn_file_actions_destroy(&actions) }
         let logPath = startupLog(paths).path
         let log = open(logPath, O_WRONLY | O_APPEND | O_CREAT | O_CLOEXEC | O_NOFOLLOW, 0o600)

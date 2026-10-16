@@ -1,4 +1,5 @@
 import Foundation
+import LatheLocalization
 
 public enum ProviderAPI: String, Codable, CaseIterable, Sendable {
     case openAIResponses, openAIChat
@@ -28,18 +29,18 @@ public struct ProviderProfile: Codable, Identifiable, Sendable, Equatable {
               components.user == nil, components.password == nil, components.query == nil, components.fragment == nil,
               components.port.map({ 1...65535 ~= $0 }) ?? true,
               components.url != nil else {
-            throw LatheError.invalidRequest("모델 연결의 이름·모델·base URL을 확인하세요. URL에는 인증 정보나 query를 넣을 수 없습니다.")
+            throw LatheError.invalidRequest(L10n.text("domain.profile.invalid", table: "DomainErrors"))
         }
         guard components.scheme == "https" || (components.scheme == "http" && allowInsecureHTTP) else {
-            throw LatheError.invalidRequest("HTTPS가 필요합니다. HTTP 서버는 해당 연결에서 명시적으로 허용하세요.")
+            throw LatheError.invalidRequest(L10n.text("domain.profile.requiresHTTPS", table: "DomainErrors"))
         }
         guard !components.path.split(separator: "/").contains(where: { $0 == "." || $0 == ".." }) else {
-            throw LatheError.invalidRequest("base URL에는 상대 경로를 사용할 수 없습니다.")
+            throw LatheError.invalidRequest(L10n.text("domain.profile.relativePath", table: "DomainErrors"))
         }
         if let reasoningEffort {
             guard !reasoningEffort.isEmpty, reasoningEffort.utf8.count <= 40,
                   reasoningEffort.allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "_" || $0 == "-") }) else {
-                throw LatheError.invalidRequest("유효하지 않은 reasoning effort입니다.")
+                throw LatheError.invalidRequest(L10n.text("domain.profile.invalidReasoningEffort", table: "DomainErrors"))
             }
         }
     }

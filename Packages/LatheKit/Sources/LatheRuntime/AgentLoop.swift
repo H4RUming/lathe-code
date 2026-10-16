@@ -1,6 +1,7 @@
 import CryptoKit
 import Foundation
 import LatheDomain
+import LatheLocalization
 import LathePersistence
 import LatheProviders
 import LatheTools
@@ -10,16 +11,16 @@ extension EngineRuntime {
 
     public func saveProviderProfile(_ profile: ProviderProfile, apiKey: String?, clearCredential: Bool) throws -> [ProviderProfile] {
         try profile.validate()
-        guard !clearCredential || apiKey == nil else { throw LatheError.invalidRequest("키 입력과 삭제를 동시에 지정할 수 없습니다.") }
+        guard !clearCredential || apiKey == nil else { throw LatheError.invalidRequest(L10n.text("runtime.credentials.conflictingOperation", table: "RuntimeMessages")) }
         if let key = apiKey {
             guard !key.isEmpty, key.utf8.count <= 16_384, !key.contains(where: { $0.isNewline || $0.asciiValue == 0 }) else {
-                throw LatheError.invalidRequest("API 키 형식을 확인하세요.")
+                throw LatheError.invalidRequest(L10n.text("runtime.credentials.invalidKey", table: "RuntimeMessages"))
             }
         }
         let previous = try store.listProviderProfiles().first { $0.id == profile.id }
         if let previous, previous.baseURL != profile.baseURL, apiKey == nil, !clearCredential,
            try credentials.get(id: Self.credentialID(previous)) != nil {
-            throw LatheError.invalidRequest("서버 주소를 바꾸려면 API 키를 다시 입력하거나 기존 키 삭제를 선택하세요.")
+            throw LatheError.invalidRequest(L10n.text("runtime.credentials.endpointChange", table: "RuntimeMessages"))
         }
         // Credentials never enter SQLite, events or the provider profile response.
         // Endpoint binding prevents a metadata-write failure or an endpoint
@@ -44,17 +45,17 @@ extension EngineRuntime {
 
     public func decideApproval(invocationID: UUID, requestHash: String, approved: Bool) throws -> ToolInvocationSnapshot {
         var item = try store.invocation(id: invocationID)
-        guard item.requestHash == requestHash else { throw LatheError.conflict("승인 대상이 변경되었습니다.") }
+        guard item.requestHash == requestHash else { throw LatheError.conflict(L10n.text("runtime.approval.requestChanged", table: "RuntimeMessages")) }
         let run = try store.run(id: item.runID)
-        guard run.state == .running, workers[run.id] != nil else { throw LatheError.conflict("종료되거나 복구된 실행에는 승인할 수 없습니다.") }
+        guard run.state == .running, workers[run.id] != nil else { throw LatheError.conflict(L10n.text("runtime.approval.runNotActive", table: "RuntimeMessages")) }
         if approved && [.approved, .executing, .completed].contains(item.state) { return item }
         if !approved && item.state == .denied { return item }
         guard item.state == .pendingApproval, let mode = run.configuration?.permissionMode,
               mode == .requestApproval || mode == .autoApprove || (mode == .acceptEdits && item.effect == .shell) else {
-            throw LatheError.conflict("현재 권한 모드에서 승인 대기 중인 도구가 아닙니다.")
+            throw LatheError.conflict(L10n.text("runtime.approval.notPending", table: "RuntimeMessages"))
         }
         item.state = approved ? .approved : .denied
-        if !approved { item.output = "사용자가 실행을 거절했습니다." }
+        if !approved { item.output = L10n.text("runtime.approval.userDenied", table: "RuntimeMessages") }
         try store.saveInvocation(item)
         return item
     }
@@ -90,29 +91,29 @@ extension EngineRuntime {
                     return
                 case .clientTools:
                     guard !step.calls.isEmpty, callIDs.count + step.calls.count <= 64 else {
-                        throw LatheError.invalidRequest("도구 호출 한도(64개)에 도달했습니다.")
+                        throw LatheError.invalidRequest(L10n.text("runtime.tools.callLimit", table: "RuntimeMessages"))
                     }
                     for call in step.calls {
                         guard callIDs.insert(call.id).inserted else {
-                            throw LatheError.conflict("중복된 도구 호출 ID는 재실행하지 않습니다.")
+                            throw LatheError.conflict(L10n.text("runtime.tools.duplicateCall", table: "RuntimeMessages"))
                         }
                         let output = try await invoke(call, runID: run.id, workspace: workspace, configuration: configuration)
                         try checkActive(run.id)
                         messages.append(.toolResult(callID: call.id, content: output))
                         try saveHistory(messages, runID: run.id)
                     }
-                case .blocked: throw LatheError.invalidRequest("모델이 요청을 차단했습니다.")
-                case .truncated: throw LatheError.invalidRequest("모델 응답이 중간에 잘렸습니다. 미완성 도구는 실행하지 않았습니다.")
-                case .noUsableOutput: throw LatheError.invalidRequest("모델이 사용할 수 있는 응답을 반환하지 않았습니다.")
+                case .blocked: throw LatheError.invalidRequest(L10n.text("runtime.model.blocked", table: "RuntimeMessages"))
+                case .truncated: throw LatheError.invalidRequest(L10n.text("runtime.model.truncated", table: "RuntimeMessages"))
+                case .noUsableOutput: throw LatheError.invalidRequest(L10n.text("runtime.model.noUsableOutput", table: "RuntimeMessages"))
                 }
             }
-            throw LatheError.invalidRequest("모델 실행 단계 한도에 도달했습니다.")
+            throw LatheError.invalidRequest(L10n.text("runtime.model.stepLimit", table: "RuntimeMessages"))
         } catch is CancellationError {
             // cancel() attempts the terminal receipt before awaiting cleanup.
             // A persistence failure is returned to its caller, never a reason to keep effects running.
         } catch {
             if (try? store.run(id: run.id).state) == .running {
-                let message = Self.boundedText("\n실행 실패: " + error.localizedDescription, bytes: 4_096)
+                let message = Self.boundedText(L10n.format("runtime.run.failed", table: "RuntimeMessages", error.localizedDescription), bytes: 4_096)
                 _ = try? store.append(runID: run.id, text: message)
                 _ = try? store.finish(runID: run.id, state: .failed, reason: message)
             }
@@ -127,7 +128,7 @@ extension EngineRuntime {
     private func appendModelText(runID: UUID, text: String) throws {
         try checkActive(runID)
         guard try store.run(id: runID).response.utf8.count + text.utf8.count <= 65_536 else {
-            throw LatheError.invalidRequest("이 실행의 응답 출력 한도(64 KiB)에 도달했습니다.")
+            throw LatheError.invalidRequest(L10n.text("runtime.model.outputLimit", table: "RuntimeMessages"))
         }
         var chunk = ""
         for scalar in text.unicodeScalars {
@@ -140,7 +141,7 @@ extension EngineRuntime {
 
     private func saveHistory(_ messages: [ModelMessage], runID: UUID) throws {
         let data = try JSONEncoder().encode(messages)
-        guard data.count <= 2_097_152 else { throw LatheError.invalidRequest("대화 context 한도에 도달했습니다. 새 세션을 시작하세요.") }
+        guard data.count <= 2_097_152 else { throw LatheError.invalidRequest(L10n.text("runtime.history.sizeLimit", table: "RuntimeMessages")) }
         let id = try blobs.put(data)
         try store.saveModelHistory(runID: runID, blobID: id)
     }
@@ -150,7 +151,7 @@ extension EngineRuntime {
         let prepared: PreparedTool
         do { prepared = try ToolBroker.prepare(call: call, workspace: workspace, protectedPaths: [dataDirectory]) }
         catch {
-            let message = Self.boundedText("도구 요청 거절: " + error.localizedDescription, bytes: 4_096)
+            let message = Self.boundedText(L10n.format("runtime.tools.requestRejected", table: "RuntimeMessages", error.localizedDescription), bytes: 4_096)
             let hash = SHA256.hash(data: Data((call.name + "\n" + call.arguments).utf8)).map { String(format: "%02x", $0) }.joined()
             try store.saveInvocation(.init(runID: runID, callID: call.id, name: Self.boundedText(call.name, bytes: 128),
                                            arguments: Self.boundedText(call.arguments, bytes: 32_768), requestHash: hash,
@@ -173,18 +174,18 @@ extension EngineRuntime {
                 try checkActive(runID)
                 item = try store.invocation(id: item.id)
                 if ContinuousClock.now >= deadline && item.state == .pendingApproval {
-                    item.state = .denied; item.output = "승인 대기 시간이 초과되어 실행하지 않았습니다."
+                    item.state = .denied; item.output = L10n.text("runtime.approval.timedOut", table: "RuntimeMessages")
                     try store.saveInvocation(item)
                 }
             } while item.state == .pendingApproval
         }
         try checkActive(runID)
-        guard item.state == .approved else { return item.output ?? "도구 실행이 거절되었습니다." }
+        guard item.state == .approved else { return item.output ?? L10n.text("runtime.tools.denied", table: "RuntimeMessages") }
         let path = workspace.standardizedFileURL.resolvingSymlinksInPath().path
         let needsLease = prepared.effect != .read
         if needsLease {
             guard !writeOwners.keys.contains(where: { $0 == path || $0.hasPrefix(path + "/") || path.hasPrefix($0 + "/") }) else {
-                item.state = .failed; item.output = "이 프로젝트에서 다른 실행이 파일 변경 또는 명령을 수행 중입니다."
+                item.state = .failed; item.output = L10n.text("runtime.workspace.writeLeaseBusy", table: "RuntimeMessages")
                 try store.saveInvocation(item)
                 return item.output!
             }
@@ -228,7 +229,7 @@ extension EngineRuntime {
                     // Even a known no-effect failure needs a durable receipt
                     // before the next model step can consume its result.
                     try store.saveInvocation(item)
-                    return item.output ?? "도구 실행에 실패했습니다."
+                    return item.output ?? L10n.text("runtime.tools.failed", table: "RuntimeMessages")
                 }
                 try? store.saveInvocation(item)
             }
@@ -244,7 +245,7 @@ extension EngineRuntime {
             guard result.utf8.count + piece.utf8.count <= bytes - 32 else { break }
             result += piece
         }
-        return result + "\n[출력 일부 생략]"
+        return result + L10n.text("runtime.output.truncated", table: "RuntimeMessages")
     }
 
     private static func credentialID(_ profile: ProviderProfile) -> UUID {

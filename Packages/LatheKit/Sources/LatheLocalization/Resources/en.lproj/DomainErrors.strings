@@ -1,0 +1,8 @@
+/* Fixed application errors; runtime values and external diagnostics remain unchanged. */
+"domain.permission.unknown" = "Unknown permission mode: %1$@";
+"domain.profile.invalid" = "Check the connection name, model, and base URL. The URL cannot contain credentials or query parameters.";
+"domain.profile.invalidReasoningEffort" = "The reasoning effort value is invalid.";
+"domain.profile.relativePath" = "The base URL cannot contain relative path components.";
+"domain.profile.requiresHTTPS" = "HTTPS is required. Explicitly allow HTTP for this connection to use an HTTP server.";
+"domain.protocol.unsupported" = "Unsupported engine protocol version: %1$@";
+"domain.run.invalidLimits" = "The step limit must be 1–24 and the approval timeout must be 1–600 seconds.";

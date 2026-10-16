@@ -1,5 +1,6 @@
 import Darwin
 import Foundation
+import LatheLocalization
 import LatheExecution
 
 @main
@@ -14,16 +15,16 @@ struct LatheRunnerMain {
             let file = try FileHandle(forReadingFrom: paths.request)
             defer { try? file.close() }
             let data = try file.read(upToCount: 131_073) ?? Data()
-            guard data.count <= 131_072 else { throw RunnerFailure.invalid("Runner request exceeds 128 KiB.") }
+            guard data.count <= 131_072 else { throw RunnerFailure.invalid(L10n.text("runner.requestLimit", table: "RunnerMessages")) }
             let request = try JSONDecoder().decode(RunnerRequest.self, from: data)
-            guard request.protocolVersion == 1 else { throw RunnerFailure.invalid("Unsupported runner protocol version.") }
+            guard request.protocolVersion == 1 else { throw RunnerFailure.invalid(L10n.text("runner.protocolVersion", table: "RunnerMessages")) }
             let created = try ExecutionJournal(root: paths.journal, command: request.command)
             journal = created
             let runner = ProcessRunner()
             let controls = RunnerControl(runner: runner, journal: created)
             let flags = fcntl(STDOUT_FILENO, F_GETFL)
             guard flags >= 0, fcntl(STDOUT_FILENO, F_SETFL, flags | O_NONBLOCK) == 0 else {
-                throw RunnerFailure.io("configure event channel", errno)
+                let code = errno; throw RunnerFailure.io(L10n.text("runner.operation.configureEvents", table: "RunnerMessages"), code)
             }
             signal(SIGINT, SIG_IGN)
             signal(SIGTERM, SIG_IGN)
@@ -59,25 +60,18 @@ struct LatheRunnerMain {
     private static func parseArguments() throws -> (request: URL, journal: URL) {
         let args = Array(CommandLine.arguments.dropFirst())
         if args == ["--help"] {
-            print("""
-            lathe-runner — internal M0 execution helper (no policy/sandbox)
-            Usage: lathe-runner --request /absolute/request.json --journal /absolute/fresh-directory
-            stdin: NDJSON controls input(base64 data), eof, resize(columns/rows), cancel.
-            Keep stdin open while supervising; owner EOF cancels the process group.
-            stdout: versioned journal events. intent/result files are retained in --journal.
-            This is a developer harness; model tools are not connected to it yet.
-            """)
+            print(L10n.text("runner.help", table: "RunnerMessages"))
             exit(0)
         }
         guard args.count == 4, args[0] == "--request", args[2] == "--journal",
               args[1].hasPrefix("/"), args[3].hasPrefix("/"),
               !args[1].contains("\0"), !args[3].contains("\0") else {
-            throw RunnerFailure.invalid("Usage: lathe-runner --request /absolute/request.json --journal /absolute/fresh-directory")
+            throw RunnerFailure.invalid(L10n.text("runner.usage", table: "RunnerMessages"))
         }
         return (URL(fileURLWithPath: args[1]), URL(fileURLWithPath: args[3], isDirectory: true))
     }
 
     private static func stderr(_ text: String) {
-        FileHandle.standardError.write(Data(("lathe-runner: " + text + "\n").utf8))
+        FileHandle.standardError.write(Data(L10n.format("runner.error", table: "RunnerMessages", text).utf8))
     }
 }

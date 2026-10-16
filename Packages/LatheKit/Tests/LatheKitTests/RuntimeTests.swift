@@ -1,6 +1,7 @@
 import CSQLite
 import Foundation
 import LatheDomain
+@testable import LatheLocalization
 import LathePersistence
 import LatheRuntime
 import Testing
@@ -52,37 +53,41 @@ struct RuntimeTests {
     }
 }
 
-@Test func mockStreamPersistsAndReplaysExactly() async throws {
-    let fixture = try RuntimeFixture()
-    defer { fixture.cleanUp() }
-    let runtime = try EngineRuntime(databaseURL: fixture.database, chunkDelay: .milliseconds(1))
-    let session = try await runtime.createSession(title: "스트림", workspacePath: fixture.workspace.path)
-    let started = try await runtime.submit(sessionID: session.id, prompt: "이 코드를 설명해 줘", requestID: UUID())
-    let completed = try await finishedRun(runtime, sessionID: session.id, runID: started.id)
-    #expect(completed.state == .completed)
-    #expect(completed.finishedAt != nil)
-    #expect(completed.response.contains("M0 mock"))
-    #expect(completed.response.contains("shell을 호출하지 않았습니다"))
+@Test(arguments: ["ko", "en"])
+func mockStreamPersistsAndReplaysExactly(language: String) async throws {
+    try await L10n.$localeOverride.withValue(Locale(identifier: language)) {
+        let fixture = try RuntimeFixture()
+        defer { fixture.cleanUp() }
+        let runtime = try EngineRuntime(databaseURL: fixture.database, chunkDelay: .milliseconds(1))
+        let session = try await runtime.createSession(title: "스트림", workspacePath: fixture.workspace.path)
+        let prompt = "이 코드를 설명해 줘 — 100% %@ %lld"
+        let started = try await runtime.submit(sessionID: session.id, prompt: prompt, requestID: UUID())
+        let completed = try await finishedRun(runtime, sessionID: session.id, runID: started.id)
+        #expect(completed.state == .completed)
+        #expect(completed.finishedAt != nil)
+        #expect(completed.response == L10n.format("runtime.mock.response", table: "RuntimeMessages", prompt))
+        #expect(completed.response.contains(prompt))
 
-    var cursor: Int64 = 0
-    var replay: [EngineEvent] = []
-    while true {
-        let page = try await runtime.events(after: cursor, sessionID: nil, limit: 3)
-        #expect(page.nextCursor >= cursor)
-        replay += page.events
-        cursor = page.nextCursor
-        if page.events.isEmpty { break }
+        var cursor: Int64 = 0
+        var replay: [EngineEvent] = []
+        while true {
+            let page = try await runtime.events(after: cursor, sessionID: nil, limit: 3)
+            #expect(page.nextCursor >= cursor)
+            replay += page.events
+            cursor = page.nextCursor
+            if page.events.isEmpty { break }
+        }
+        #expect(replay.map(\.sequence) == Array(1...Int64(replay.count)))
+        #expect(replay.first?.kind == .sessionCreated)
+        #expect(replay.last?.kind == .runCompleted)
+        #expect(replay.filter { $0.kind == .runStarted }.count == 1)
+        #expect(replay.filter { $0.kind == .textDelta }.compactMap(\.text).joined() == completed.response)
+
+        let reopened = try EngineRuntime(databaseURL: fixture.database)
+        let restored = try await reopened.session(id: session.id)
+        #expect(restored.runs == [completed])
+        #expect(try await reopened.events(after: cursor, sessionID: nil).events.isEmpty)
     }
-    #expect(replay.map(\.sequence) == Array(1...Int64(replay.count)))
-    #expect(replay.first?.kind == .sessionCreated)
-    #expect(replay.last?.kind == .runCompleted)
-    #expect(replay.filter { $0.kind == .runStarted }.count == 1)
-    #expect(replay.filter { $0.kind == .textDelta }.compactMap(\.text).joined() == completed.response)
-
-    let reopened = try EngineRuntime(databaseURL: fixture.database)
-    let restored = try await reopened.session(id: session.id)
-    #expect(restored.runs == [completed])
-    #expect(try await reopened.events(after: cursor, sessionID: nil).events.isEmpty)
 }
 
 @Test func idempotencySurvivesCompletionAndRestartAndRejectsChangedPayload() async throws {
@@ -319,27 +324,32 @@ struct RuntimeTests {
     #expect(completed.response.contains("…"))
 }
 
-@Test func eventWriteFailureRollsBackProjectionAndCanRetry() throws {
-    let fixture = try RuntimeFixture()
-    defer { fixture.cleanUp() }
-    let store = try SQLiteStore(databaseURL: fixture.database)
-    let session = try store.createSession(title: "atomic", workspacePath: fixture.workspace.path)
-    let run = try store.submit(sessionID: session.id, prompt: "atomic write", requestID: UUID()).run
-    var connection: OpaquePointer?
-    #expect(sqlite3_open(fixture.database.path, &connection) == SQLITE_OK)
-    defer { sqlite3_close(connection) }
-    let database = try #require(connection)
-    let trigger = "CREATE TRIGGER reject_delta BEFORE INSERT ON events WHEN NEW.kind = 'textDelta' BEGIN SELECT RAISE(ABORT, 'injected event failure'); END"
-    #expect(sqlite3_exec(database, trigger, nil, nil, nil) == SQLITE_OK)
-    do {
-        try store.append(runID: run.id, text: "must roll back")
-        Issue.record("주입한 이벤트 쓰기 오류가 발생하지 않았습니다.")
-    } catch LatheError.storage { }
-    #expect(try store.run(id: run.id).response.isEmpty)
-    #expect(try store.events(after: 0, sessionID: session.id, limit: 256).events.map(\.kind) == [.sessionCreated, .runStarted])
-    #expect(sqlite3_exec(database, "DROP TRIGGER reject_delta", nil, nil, nil) == SQLITE_OK)
-    #expect(try store.append(runID: run.id, text: "committed"))
-    #expect(try store.run(id: run.id).response == "committed")
-    #expect(try store.events(after: 0, sessionID: session.id, limit: 256).events.last?.text == "committed")
+@Test(arguments: ["ko", "en"])
+func eventWriteFailureRollsBackProjectionAndCanRetry(language: String) throws {
+    try L10n.$localeOverride.withValue(Locale(identifier: language)) {
+        let fixture = try RuntimeFixture()
+        defer { fixture.cleanUp() }
+        let store = try SQLiteStore(databaseURL: fixture.database)
+        let session = try store.createSession(title: "atomic", workspacePath: fixture.workspace.path)
+        let run = try store.submit(sessionID: session.id, prompt: "atomic write", requestID: UUID()).run
+        var connection: OpaquePointer?
+        #expect(sqlite3_open(fixture.database.path, &connection) == SQLITE_OK)
+        defer { sqlite3_close(connection) }
+        let database = try #require(connection)
+        let trigger = "CREATE TRIGGER reject_delta BEFORE INSERT ON events WHEN NEW.kind = 'textDelta' BEGIN SELECT RAISE(ABORT, 'injected event failure 100% %@'); END"
+        #expect(sqlite3_exec(database, trigger, nil, nil, nil) == SQLITE_OK)
+        do {
+            try store.append(runID: run.id, text: "must roll back")
+            Issue.record("주입한 이벤트 쓰기 오류가 발생하지 않았습니다.")
+        } catch LatheError.storage(let message) {
+            #expect(message == L10n.format("storage.database.operationFailed", table: "StorageErrors", "injected event failure 100% %@"))
+        }
+        #expect(try store.run(id: run.id).response.isEmpty)
+        #expect(try store.events(after: 0, sessionID: session.id, limit: 256).events.map(\.kind) == [.sessionCreated, .runStarted])
+        #expect(sqlite3_exec(database, "DROP TRIGGER reject_delta", nil, nil, nil) == SQLITE_OK)
+        #expect(try store.append(runID: run.id, text: "committed"))
+        #expect(try store.run(id: run.id).response == "committed")
+        #expect(try store.events(after: 0, sessionID: session.id, limit: 256).events.last?.text == "committed")
+    }
 }
 }

@@ -1,6 +1,7 @@
 import CSQLite
 import Foundation
 import LatheDomain
+import LatheLocalization
 
 /// Synchronous by design. The owning EngineRuntime actor serializes access;
 /// the engine's process lock prevents another engine from recovering live runs.
@@ -9,7 +10,7 @@ public final class SQLiteStore {
 
     public init(databaseURL: URL) throws {
         guard databaseURL.isFileURL else {
-            throw LatheError.invalidRequest("데이터베이스는 로컬 파일이어야 합니다.")
+            throw LatheError.invalidRequest(L10n.text("storage.database.localFileRequired", table: "StorageErrors"))
         }
         try FileManager.default.createDirectory(
             at: databaseURL.deletingLastPathComponent(),
@@ -20,7 +21,7 @@ public final class SQLiteStore {
             SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX, nil
         )
         guard result == SQLITE_OK else {
-            let error = storageError("데이터베이스 열기 실패")
+            let error = LatheError.storage(L10n.format("storage.database.openFailed", table: "StorageErrors", databaseDetail()))
             sqlite3_close(database)
             database = nil
             throw error
@@ -43,13 +44,13 @@ public final class SQLiteStore {
 
     public func listSessions(before: UUID? = nil, limit: Int = 50) throws -> SessionPage {
         guard (1...50).contains(limit) else {
-            throw LatheError.invalidRequest("세션 페이지 limit은 1~50이어야 합니다.")
+            throw LatheError.invalidRequest(L10n.text("storage.session.invalidPageLimit", table: "StorageErrors"))
         }
         var sql = "SELECT id FROM sessions"
         var values: [Value] = []
         if let before {
             guard let row = try query("SELECT rowid FROM sessions WHERE id = ?", [.text(before.uuidString)]).first else {
-                throw LatheError.notFound("세션 페이지 cursor를 찾을 수 없습니다.")
+                throw LatheError.notFound(L10n.text("storage.session.cursorNotFound", table: "StorageErrors"))
             }
             sql += " WHERE rowid < ?"
             values.append(row[0])
@@ -63,7 +64,7 @@ public final class SQLiteStore {
 
     public func session(id: UUID, beforeRunID: UUID? = nil, limit: Int = 4) throws -> SessionSnapshot {
         guard (1...4).contains(limit) else {
-            throw LatheError.invalidRequest("실행 페이지 limit은 1~4여야 합니다.")
+            throw LatheError.invalidRequest(L10n.text("storage.run.invalidPageLimit", table: "StorageErrors"))
         }
         let metadata = try sessionMetadata(id: id)
         var sql = "SELECT id, session_id, prompt, response, state, started_at, finished_at, configuration FROM runs WHERE session_id = ?"
@@ -72,7 +73,7 @@ public final class SQLiteStore {
             guard let row = try query(
                 "SELECT rowid FROM runs WHERE id = ? AND session_id = ?",
                 [.text(beforeRunID.uuidString), .text(id.uuidString)]
-            ).first else { throw LatheError.notFound("이 세션에서 실행 페이지 cursor를 찾을 수 없습니다.") }
+            ).first else { throw LatheError.notFound(L10n.text("storage.run.cursorNotFound", table: "StorageErrors")) }
             sql += " AND rowid < ?"
             values.append(row[0])
         }
@@ -97,7 +98,7 @@ public final class SQLiteStore {
             FROM sessions WHERE id = ?
             """,
             [.text(id.uuidString)]
-        ).first else { throw LatheError.notFound("세션을 찾을 수 없습니다.") }
+        ).first else { throw LatheError.notFound(L10n.text("storage.session.notFound", table: "StorageErrors")) }
         return SessionSnapshot(
             id: try uuid(row[0]), title: try string(row[1]), workspacePath: try string(row[2]),
             createdAt: try date(row[3]), updatedAt: try date(row[4]),
@@ -109,7 +110,7 @@ public final class SQLiteStore {
         guard let row = try query(
             "SELECT id, session_id, prompt, response, state, started_at, finished_at, configuration FROM runs WHERE id = ?",
             [.text(id.uuidString)]
-        ).first else { throw LatheError.notFound("실행을 찾을 수 없습니다.") }
+        ).first else { throw LatheError.notFound(L10n.text("storage.run.notFound", table: "StorageErrors")) }
         return try decodeRun(row)
     }
 
@@ -126,7 +127,7 @@ public final class SQLiteStore {
             let existing = try query("SELECT id FROM provider_profiles WHERE id = ?", [.text(profile.id.uuidString)])
             if existing.isEmpty {
                 guard try integer(query("SELECT COUNT(*) FROM provider_profiles")[0][0]) < 64 else {
-                    throw LatheError.invalidRequest("Provider 설정은 최대 64개까지 저장할 수 있습니다.")
+                    throw LatheError.invalidRequest(L10n.text("storage.provider.profileLimit", table: "StorageErrors"))
                 }
             }
             try execute(
@@ -138,13 +139,13 @@ public final class SQLiteStore {
 
     public func invocation(id: UUID) throws -> ToolInvocationSnapshot {
         guard let row = try query("SELECT snapshot FROM tool_invocations WHERE id = ?", [.text(id.uuidString)]).first else {
-            throw LatheError.notFound("도구 실행을 찾을 수 없습니다.")
+            throw LatheError.notFound(L10n.text("storage.tool.notFound", table: "StorageErrors"))
         }
         return try decode(string(row[0]))
     }
 
     public func saveModelHistory(runID: UUID, blobID: String) throws {
-        guard BlobStore.validID(blobID) else { throw LatheError.invalidRequest("Blob 식별자가 올바르지 않습니다.") }
+        guard BlobStore.validID(blobID) else { throw LatheError.invalidRequest(L10n.text("storage.blob.invalidID", table: "StorageErrors")) }
         try transaction {
             _ = try run(id: runID)
             try execute(
@@ -158,7 +159,7 @@ public final class SQLiteStore {
         _ = try run(id: runID)
         guard let row = try query("SELECT blob_id FROM model_histories WHERE run_id = ?", [.text(runID.uuidString)]).first else { return nil }
         let id = try string(row[0])
-        guard BlobStore.validID(id) else { throw LatheError.storage("저장된 Blob 식별자가 올바르지 않습니다.") }
+        guard BlobStore.validID(id) else { throw LatheError.storage(L10n.text("storage.blob.invalidStoredID", table: "StorageErrors")) }
         return id
     }
 
@@ -181,7 +182,7 @@ public final class SQLiteStore {
                   BlobStore.validID(snapshot.requestHash),
                   snapshot.beforeBlobID.map(BlobStore.validID) ?? true,
                   snapshot.blobID.map(BlobStore.validID) ?? true else {
-                throw LatheError.invalidRequest("도구 실행 메타데이터가 크기 제한을 초과했습니다.")
+                throw LatheError.invalidRequest(L10n.text("storage.tool.metadataTooLarge", table: "StorageErrors"))
             }
             if let row = try query("SELECT snapshot FROM tool_invocations WHERE id = ?", [.text(snapshot.id.uuidString)]).first {
                 let previous: ToolInvocationSnapshot = try decode(string(row[0]))
@@ -189,7 +190,7 @@ public final class SQLiteStore {
                       previous.name == snapshot.name, previous.arguments == snapshot.arguments,
                       previous.requestHash == snapshot.requestHash, previous.summary == snapshot.summary,
                       previous.effect == snapshot.effect, previous.createdAt == snapshot.createdAt else {
-                    throw LatheError.conflict("저장된 도구 요청의 내용은 변경할 수 없습니다.")
+                    throw LatheError.conflict(L10n.text("storage.tool.immutableRequest", table: "StorageErrors"))
                 }
                 if previous == snapshot { return }
                 var withBaseline = previous
@@ -197,26 +198,26 @@ public final class SQLiteStore {
                 let capturesBaseline = previous.state == .executing && snapshot.effect == .write &&
                     previous.beforeBlobID == nil && snapshot.beforeBlobID != nil && snapshot == withBaseline
                 guard previous.beforeBlobID == snapshot.beforeBlobID || capturesBaseline else {
-                    throw LatheError.conflict("기존 파일 원본은 승인 후 실행 중 한 번만 기록할 수 있습니다.")
+                    throw LatheError.conflict(L10n.text("storage.tool.baselineAlreadyRecorded", table: "StorageErrors"))
                 }
                 guard !isTerminal(previous.state), capturesBaseline || validTransition(from: previous.state, to: snapshot.state) else {
-                    throw LatheError.conflict("종료된 도구를 다시 실행하거나 상태를 되돌릴 수 없습니다.")
+                    throw LatheError.conflict(L10n.text("storage.tool.invalidStateTransition", table: "StorageErrors"))
                 }
                 guard run.state == .running || isTerminal(snapshot.state) else {
-                    throw LatheError.conflict("종료된 실행에서 도구를 승인하거나 시작할 수 없습니다.")
+                    throw LatheError.conflict(L10n.text("storage.tool.finishedRunCannotExecute", table: "StorageErrors"))
                 }
             } else {
                 guard run.state == .running else {
-                    throw LatheError.conflict("종료된 실행에 새 도구를 추가할 수 없습니다.")
+                    throw LatheError.conflict(L10n.text("storage.tool.finishedRunCannotAdd", table: "StorageErrors"))
                 }
                 guard snapshot.state == .pendingApproval || snapshot.state == .approved || snapshot.state == .denied else {
-                    throw LatheError.invalidRequest("도구 실행은 권한 결정부터 기록해야 합니다.")
+                    throw LatheError.invalidRequest(L10n.text("storage.tool.permissionDecisionRequired", table: "StorageErrors"))
                 }
                 guard snapshot.beforeBlobID == nil else {
-                    throw LatheError.invalidRequest("승인 전 도구 요청에 기존 파일 원본을 저장할 수 없습니다.")
+                    throw LatheError.invalidRequest(L10n.text("storage.tool.unapprovedBaseline", table: "StorageErrors"))
                 }
                 guard try integer(query("SELECT COUNT(*) FROM tool_invocations WHERE run_id = ?", [.text(snapshot.runID.uuidString)])[0][0]) < 64 else {
-                    throw LatheError.invalidRequest("한 실행에서 도구 요청은 최대 64개입니다.")
+                    throw LatheError.invalidRequest(L10n.text("storage.tool.invocationLimit", table: "StorageErrors"))
                 }
             }
             try writeInvocation(snapshot)
@@ -229,7 +230,7 @@ public final class SQLiteStore {
         try transaction {
             for var snapshot in try invocations(runID: runID) where snapshot.state == .pendingApproval || snapshot.state == .approved {
                 snapshot.state = .cancelled
-                snapshot.output = "실행 종료로 대기 중인 도구 승인이 취소되었습니다."
+                snapshot.output = L10n.text("storage.tool.approvalCancelledOnFinish", table: "StorageErrors")
                 try writeInvocation(snapshot)
             }
         }
@@ -285,24 +286,24 @@ public final class SQLiteStore {
                 [.text(requestID.uuidString)]
             ).first {
                 guard try uuid(existing[0]) == sessionID, try string(existing[1]) == prompt else {
-                    throw LatheError.conflict("같은 요청 ID에 다른 내용이 지정되었습니다.")
+                    throw LatheError.conflict(L10n.text("storage.request.identityConflict", table: "StorageErrors"))
                 }
                 let previous = try run(id: uuid(existing[2]))
                 guard previous.configuration == configuration else {
-                    throw LatheError.conflict("같은 요청 ID에 다른 실행 설정이 지정되었습니다.")
+                    throw LatheError.conflict(L10n.text("storage.request.configurationConflict", table: "StorageErrors"))
                 }
                 return (previous, false)
             }
             if let profile = configuration?.profile {
                 guard try listProviderProfiles().contains(profile) else {
-                    throw LatheError.invalidRequest("저장된 모델 연결과 요청 설정이 다릅니다. 연결 목록을 새로 읽으세요.")
+                    throw LatheError.invalidRequest(L10n.text("storage.request.staleProfile", table: "StorageErrors"))
                 }
             }
             guard !(try query("SELECT id FROM sessions WHERE id = ?", [.text(sessionID.uuidString)])).isEmpty else {
-                throw LatheError.notFound("세션을 찾을 수 없습니다.")
+                throw LatheError.notFound(L10n.text("storage.session.notFound", table: "StorageErrors"))
             }
             guard (try query("SELECT id FROM runs WHERE session_id = ? AND state = 'running'", [.text(sessionID.uuidString)])).isEmpty else {
-                throw LatheError.conflict("이 세션에서 이미 실행 중입니다.")
+                throw LatheError.conflict(L10n.text("storage.session.alreadyRunning", table: "StorageErrors"))
             }
             let run = RunSnapshot(sessionID: sessionID, prompt: prompt, startedAt: storedTimestamp(), configuration: configuration)
             try execute(
@@ -334,7 +335,7 @@ public final class SQLiteStore {
 
     @discardableResult
     public func finish(runID: UUID, state: RunState, reason: String? = nil) throws -> RunSnapshot {
-        guard state != .running else { throw LatheError.invalidRequest("종료 상태가 필요합니다.") }
+        guard state != .running else { throw LatheError.invalidRequest(L10n.text("storage.run.terminalStateRequired", table: "StorageErrors")) }
         return try transaction {
             var run = try run(id: runID)
             guard run.state == .running else { return run }
@@ -369,8 +370,8 @@ public final class SQLiteStore {
                 var invocation: ToolInvocationSnapshot = try decode(string(row[0]))
                 invocation.state = invocation.state == .executing ? .unknown : .cancelled
                 invocation.output = invocation.state == .unknown
-                    ? "엔진 재시작으로 실행 결과를 확인할 수 없습니다. 자동 재실행하지 않습니다."
-                    : "엔진 재시작으로 대기 중인 승인이 취소되었습니다."
+                    ? L10n.text("storage.recovery.toolOutcomeUnknown", table: "StorageErrors")
+                    : L10n.text("storage.recovery.approvalCancelled", table: "StorageErrors")
                 try writeInvocation(invocation)
             }
             let ids = try query("SELECT id FROM runs WHERE state = 'running' ORDER BY started_at, rowid")
@@ -379,23 +380,23 @@ public final class SQLiteStore {
                 let now = storedTimestamp()
                 try execute("UPDATE runs SET state = 'interrupted', finished_at = ? WHERE id = ?", [.real(now.timeIntervalSince1970), .text(run.id.uuidString)])
                 try touch(run.sessionID, at: now)
-                try insertEvent(sessionID: run.sessionID, runID: run.id, kind: .runInterrupted, text: "엔진 재시작으로 실행이 중단되었습니다.", timestamp: now)
+                try insertEvent(sessionID: run.sessionID, runID: run.id, kind: .runInterrupted, text: L10n.text("storage.recovery.runInterrupted", table: "StorageErrors"), timestamp: now)
             }
         }
     }
 
     public func events(after cursor: Int64, sessionID: UUID?, runID: UUID? = nil, limit: Int) throws -> EventPage {
         guard cursor >= 0, (1...1_024).contains(limit) else {
-            throw LatheError.invalidRequest("cursor는 0 이상, limit은 1~1024여야 합니다.")
+            throw LatheError.invalidRequest(L10n.text("storage.events.invalidPage", table: "StorageErrors"))
         }
         if let sessionID,
            try query("SELECT id FROM sessions WHERE id = ?", [.text(sessionID.uuidString)]).isEmpty {
-            throw LatheError.notFound("세션을 찾을 수 없습니다.")
+            throw LatheError.notFound(L10n.text("storage.session.notFound", table: "StorageErrors"))
         }
         if let runID {
             let run = try run(id: runID)
             guard sessionID == nil || sessionID == run.sessionID else {
-                throw LatheError.invalidRequest("실행이 지정된 세션에 속하지 않습니다.")
+                throw LatheError.invalidRequest(L10n.text("storage.events.sessionMismatch", table: "StorageErrors"))
             }
         }
         let highWater = try integer(query("SELECT COALESCE(MAX(sequence), 0) FROM events")[0][0])
@@ -406,7 +407,7 @@ public final class SQLiteStore {
         sql += " ORDER BY sequence LIMIT ?"
         values.append(.integer(Int64(limit)))
         let events = try query(sql, values).map { row -> EngineEvent in
-            guard let kind = EventKind(rawValue: try string(row[3])) else { throw LatheError.storage("잘못된 이벤트 종류입니다.") }
+            guard let kind = EventKind(rawValue: try string(row[3])) else { throw LatheError.storage(L10n.text("storage.events.invalidKind", table: "StorageErrors")) }
             return EngineEvent(
                 sequence: try integer(row[0]), sessionID: try uuid(row[1]),
                 runID: try optionalString(row[2]).map { try uuid(.text($0)) }, kind: kind,
@@ -419,7 +420,7 @@ public final class SQLiteStore {
 
     private func migrate() throws {
         let version = try integer(query("PRAGMA user_version")[0][0])
-        guard version <= 2 else { throw LatheError.storage("더 새로운 데이터베이스 형식입니다. 앱을 업데이트하세요.") }
+        guard version <= 2 else { throw LatheError.storage(L10n.text("storage.database.newerSchema", table: "StorageErrors")) }
         guard version < 2 else { return }
         // Rebuild the v1 CHECK constraint without rewriting the request/event
         // foreign keys. Restore enforcement even when migration rolls back.
@@ -446,7 +447,7 @@ public final class SQLiteStore {
             try execute("CREATE TABLE tool_invocations (id TEXT PRIMARY KEY, run_id TEXT NOT NULL REFERENCES runs(id), call_id TEXT NOT NULL, state TEXT NOT NULL CHECK(state IN ('pendingApproval','approved','executing','completed','denied','failed','cancelled','unknown')), snapshot TEXT NOT NULL, UNIQUE(run_id, call_id))")
             try execute("CREATE INDEX run_invocations ON tool_invocations(run_id)")
             guard try query("PRAGMA foreign_key_check").isEmpty else {
-                throw LatheError.storage("마이그레이션 후 참조 무결성 검증에 실패했습니다.")
+                throw LatheError.storage(L10n.text("storage.database.migrationIntegrityFailed", table: "StorageErrors"))
             }
             try execute("PRAGMA user_version = 2")
         }
@@ -460,7 +461,7 @@ public final class SQLiteStore {
 
     private func decode<T: Decodable>(_ value: String) throws -> T {
         do { return try JSONDecoder().decode(T.self, from: Data(value.utf8)) }
-        catch { throw LatheError.storage("저장된 실행 메타데이터를 읽을 수 없습니다.") }
+        catch { throw LatheError.storage(L10n.text("storage.run.metadataUnreadable", table: "StorageErrors")) }
     }
 
     private func touch(_ sessionID: UUID, at date: Date) throws {
@@ -481,7 +482,7 @@ public final class SQLiteStore {
     }
 
     private func decodeRun(_ row: [Value]) throws -> RunSnapshot {
-        guard let state = RunState(rawValue: try string(row[4])) else { throw LatheError.storage("잘못된 실행 상태입니다.") }
+        guard let state = RunState(rawValue: try string(row[4])) else { throw LatheError.storage(L10n.text("storage.run.invalidState", table: "StorageErrors")) }
         let finishedAt: Date? = if case .null = row[6] { nil } else { try date(row[6]) }
         let configuration: RunConfiguration? = try optionalString(row[7]).map { try decode($0) }
         return RunSnapshot(id: try uuid(row[0]), sessionID: try uuid(row[1]), prompt: try string(row[2]), response: try string(row[3]), state: state, startedAt: try date(row[5]), finishedAt: finishedAt, configuration: configuration)
@@ -510,7 +511,7 @@ public final class SQLiteStore {
     private func query(_ sql: String, _ values: [Value] = []) throws -> [[Value]] {
         var statement: OpaquePointer?
         guard sqlite3_prepare_v2(database, sql, -1, &statement, nil) == SQLITE_OK else {
-            throw storageError("쿼리 준비 실패")
+            throw LatheError.storage(L10n.format("storage.database.prepareFailed", table: "StorageErrors", databaseDetail()))
         }
         defer { sqlite3_finalize(statement) }
         for (offset, value) in values.enumerated() {
@@ -522,23 +523,23 @@ public final class SQLiteStore {
             case .real(let number): sqlite3_bind_double(statement, index, number)
             case .null: sqlite3_bind_null(statement, index)
             }
-            guard result == SQLITE_OK else { throw storageError("쿼리 인수 저장 실패") }
+            guard result == SQLITE_OK else { throw LatheError.storage(L10n.format("storage.database.bindFailed", table: "StorageErrors", databaseDetail())) }
         }
         var rows: [[Value]] = []
         while true {
             let result = sqlite3_step(statement)
             if result == SQLITE_DONE { return rows }
-            guard result == SQLITE_ROW else { throw storageError("데이터베이스 작업 실패") }
+            guard result == SQLITE_ROW else { throw LatheError.storage(L10n.format("storage.database.operationFailed", table: "StorageErrors", databaseDetail())) }
             var row: [Value] = []
             for index in 0..<sqlite3_column_count(statement) {
                 switch sqlite3_column_type(statement, index) {
                 case SQLITE_INTEGER: row.append(.integer(sqlite3_column_int64(statement, index)))
                 case SQLITE_FLOAT: row.append(.real(sqlite3_column_double(statement, index)))
                 case SQLITE_TEXT:
-                    guard let bytes = sqlite3_column_text(statement, index) else { throw storageError("텍스트 읽기 실패") }
+                    guard let bytes = sqlite3_column_text(statement, index) else { throw LatheError.storage(L10n.format("storage.database.textReadFailed", table: "StorageErrors", databaseDetail())) }
                     row.append(.text(String(decoding: UnsafeBufferPointer(start: bytes, count: Int(sqlite3_column_bytes(statement, index))), as: UTF8.self)))
                 case SQLITE_NULL: row.append(.null)
-                default: throw LatheError.storage("지원하지 않는 데이터베이스 값입니다.")
+                default: throw LatheError.storage(L10n.text("storage.database.unsupportedValue", table: "StorageErrors"))
                 }
             }
             rows.append(row)
@@ -546,7 +547,7 @@ public final class SQLiteStore {
     }
 
     private func string(_ value: Value) throws -> String {
-        guard case .text(let text) = value else { throw LatheError.storage("텍스트 형식이 올바르지 않습니다.") }
+        guard case .text(let text) = value else { throw LatheError.storage(L10n.text("storage.value.invalidText", table: "StorageErrors")) }
         return text
     }
 
@@ -556,12 +557,12 @@ public final class SQLiteStore {
     }
 
     private func integer(_ value: Value) throws -> Int64 {
-        guard case .integer(let number) = value else { throw LatheError.storage("정수 형식이 올바르지 않습니다.") }
+        guard case .integer(let number) = value else { throw LatheError.storage(L10n.text("storage.value.invalidInteger", table: "StorageErrors")) }
         return number
     }
 
     private func uuid(_ value: Value) throws -> UUID {
-        guard let id = UUID(uuidString: try string(value)) else { throw LatheError.storage("식별자 형식이 올바르지 않습니다.") }
+        guard let id = UUID(uuidString: try string(value)) else { throw LatheError.storage(L10n.text("storage.value.invalidIdentifier", table: "StorageErrors")) }
         return id
     }
 
@@ -569,12 +570,11 @@ public final class SQLiteStore {
         switch value {
         case .real(let number): return Date(timeIntervalSince1970: number)
         case .integer(let number): return Date(timeIntervalSince1970: Double(number))
-        default: throw LatheError.storage("날짜 형식이 올바르지 않습니다.")
+        default: throw LatheError.storage(L10n.text("storage.value.invalidDate", table: "StorageErrors"))
         }
     }
 
-    private func storageError(_ context: String) -> LatheError {
-        let detail = database.map { String(cString: sqlite3_errmsg($0)) } ?? "SQLite 연결 없음"
-        return .storage("\(context): \(detail)")
+    private func databaseDetail() -> String {
+        return database.map { String(cString: sqlite3_errmsg($0)) } ?? L10n.text("storage.database.noConnection", table: "StorageErrors")
     }
 }
