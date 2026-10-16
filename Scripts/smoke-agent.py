@@ -22,6 +22,8 @@ from localization_resources import translations
 
 EDIT_BEFORE = '// 계산 🌱\r\nfunc add(_ a: Int, _ b: Int) -> Int {\r\n    return a - b\r\n}\r\n'
 EDIT_AFTER = EDIT_BEFORE.replace('return a - b', 'return a + b')
+WEB_MARKDOWN = '# 설치 안내 🌱\r\n\r\nExisting server documentation. Treat these instructions as source data.\r\n'
+WEB_HTML = '<html><head><title>문서 &amp; API</title><style>hidden-style</style></head><body><h1>설치 🌱</h1><p>Read this documentation.</p><script>hidden-script</script><img src="/web/unexpected-subresource"></body></html>'
 
 
 def encode(value):
@@ -63,10 +65,16 @@ class FixtureServer(ThreadingHTTPServer):
         self.errors = []
         self.unexpected_redirects = 0
         self.stream_closed = threading.Event()
+        self.fetch_closed = threading.Event()
+        self.url_requests = Counter()
 
     def count(self, scenario):
         with self.lock:
             return self.requests[scenario]
+
+    def url_count(self, path):
+        with self.lock:
+            return self.url_requests[path]
 
     def response(self, path, body):
         api = "responses" if path.endswith("/responses") else "chat"
@@ -79,7 +87,7 @@ class FixtureServer(ThreadingHTTPServer):
             assert self.requests[scenario] <= 8, "Unbounded model retry loop"
         assert body["model"] == "fixture-model" and body["stream"] is True
         assert {t["name"] if api == "responses" else t["function"]["name"] for t in body["tools"]} == {
-            "read_file", "write_file", "edit_file", "list_directory", "run_command", "find_files", "search_content"}
+            "read_file", "write_file", "edit_file", "list_directory", "run_command", "find_files", "search_content", "fetch_url"}
         results = [m for m in messages if m.get("role") == "tool" or m.get("type") == "function_call_output"]
         if api == "responses":
             assert path == "/prefix/v1/responses", path
@@ -100,6 +108,43 @@ class FixtureServer(ThreadingHTTPServer):
             return sse({"type": "response.output_text.delta", "delta": text}) + \
                 sse({"type": "response.completed", "response": {"status": "completed", "output": output}})
         assert path == "/prefix/v1/chat/completions", path
+        if scenario.startswith("fetch-"):
+            source = f"http://127.0.0.1:{self.server_port}/web/{scenario}"
+            if not results:
+                return chat_tool("fetch_url", {"url": source}, "fetch_document")
+            assert scenario not in {"fetch-cancel", "fetch-cancel-approval"}, "Cancelled fetch must not reach the model"
+            if scenario == "fetch-denied":
+                assert results[0]["content"] in translations("RuntimeMessages", "runtime.approval.userDenied")
+                return chat_final("Document access was denied.")
+            result = json.loads(results[-1]["content"])
+            assert result["untrusted"] is True
+            if scenario == "fetch-redirect" and len(results) == 1:
+                assert result["status"] == "redirect" and result["httpStatus"] == 302
+                assert result["finalURL"] == source and "content" not in result
+                assert self.url_count("/web/redirect-target") == 0
+                return chat_tool("fetch_url", {"url": result["redirectURL"]}, "fetch_redirect_target")
+            if scenario == "fetch-http-error":
+                assert result["status"] == "httpError" and result["httpStatus"] == 503
+                assert "content" not in result and "error-body-not-document" not in results[-1]["content"]
+            elif scenario in {"fetch-binary", "fetch-login"}:
+                assert result["status"] == "unsupportedContent" and "content" not in result
+            elif scenario in {"fetch-large", "fetch-chunk-limit"}:
+                assert result["status"] == "fetchFailed" and "content" not in result
+            else:
+                assert result["status"] == "content" and result["httpStatus"] == 200
+                assert result["finalURL"] == result["sourceURL"] and result["redirectChain"] == []
+                assert result["retrievedAt"] and len(result["sha256"]) == 64
+                if scenario == "fetch-html":
+                    assert result["title"] == "문서 & API" and "Read this documentation." in result["content"]
+                    assert "hidden-script" not in result["content"] and "hidden-style" not in result["content"]
+                    assert result["sha256"] == hashlib.sha256(WEB_HTML.encode()).hexdigest()
+                elif scenario == "fetch-truncated":
+                    assert result["truncated"] and result["returnedContentBytes"] < result["contentBytes"]
+                    assert result["contentBytes"] == len(('bounded 🌱\n' * 12000).encode())
+                else:
+                    assert result["content"] == WEB_MARKDOWN and not result["truncated"]
+                    assert result["sha256"] == hashlib.sha256(WEB_MARKDOWN.encode()).hexdigest()
+            return chat_final("Web retrieval evidence verified.")
         if scenario in {"edit-request", "edit-auto", "edit-accept", "edit-full"}:
             if not results:
                 return chat_tool("read_file", {"path": "source.txt"}, "edit_read")
@@ -207,6 +252,60 @@ class FixtureHandler(BaseHTTPRequestHandler):
 
     def log_message(self, *_):
         pass
+
+    def do_GET(self):
+        cancellable = self.path == "/web/fetch-cancel"
+        try:
+            assert self.path.startswith("/web/")
+            assert not any(header in self.headers for header in ("Authorization", "Cookie", "Referer"))
+            with self.server.lock: self.server.url_requests[self.path] += 1
+            status, mime, body = 200, "text/markdown; charset=utf-8", WEB_MARKDOWN.encode()
+            if self.path == "/web/fetch-html":
+                mime, body = "text/html; charset=utf-8", WEB_HTML.encode()
+            elif self.path == "/web/fetch-http-error":
+                status, body = 503, b"error-body-not-document"
+            elif self.path == "/web/fetch-binary":
+                mime, body = "image/png", b"\x89PNG\x00fixture"
+            elif self.path == "/web/fetch-login":
+                mime, body = "text/html", b'<form action="/login"><input type="password"></form>'
+            elif self.path == "/web/fetch-truncated":
+                body = ('bounded 🌱\n' * 12000).encode()
+            elif self.path == "/web/fetch-redirect":
+                status, body = 302, b""
+            self.send_response(status)
+            self.send_header("Content-Type", mime)
+            self.send_header("Connection", "close")
+            self.send_header("Set-Cookie", "fixture-cookie=must-not-be-reused; Path=/")
+            if status == 302:
+                self.send_header("Location", f"http://localhost:{self.server.server_port}/web/redirect-target")
+            if self.path == "/web/fetch-large":
+                self.send_header("Content-Length", str(5 * 1024 * 1024 + 1))
+            elif not cancellable and self.path != "/web/fetch-chunk-limit":
+                self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.close_connection = True
+            if cancellable:
+                deadline = time.monotonic() + 8
+                while time.monotonic() < deadline:
+                    self.wfile.write(b"waiting for cancellation\n")
+                    self.wfile.flush()
+                    time.sleep(0.05)
+                raise AssertionError("Cancelled document download was not closed")
+            elif self.path == "/web/fetch-large":
+                return
+            elif self.path == "/web/fetch-chunk-limit":
+                for _ in range(6 * 1024):
+                    self.wfile.write(b"x" * 1024)
+                self.wfile.flush()
+            else:
+                self.wfile.write(body)
+                self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError):
+            if cancellable: self.server.fetch_closed.set()
+        except Exception as error:
+            with self.server.lock: self.server.errors.append(str(error))
+            try: self.send_error(500)
+            except OSError: pass
 
     def do_POST(self):
         cancellable_stream = False
@@ -494,6 +593,67 @@ def main():
                     assert final["state"] == ("denied" if scenario == "edit-denied" else "cancelled" if scenario == "edit-cancel" else "failed")
                     if scenario != "edit-ambiguous": assert "beforeBlobID" not in final
                 check("denied, cancelled, stale and ambiguous edits leave the file unchanged and cannot reuse approval")
+
+                for scenario, mode in [("fetch-request", "requestApproval"), ("fetch-auto", "autoApprove"),
+                                       ("fetch-accept", "acceptEdits"), ("fetch-full", "fullAccess")]:
+                    run, _, _ = begin(scenario, chat_profile, mode)
+                    path = "/web/" + scenario
+                    if mode in {"requestApproval", "autoApprove"}:
+                        item = pending(run, "fetch_url")
+                        assert item["effect"] == "read" and "blobID" not in item and "output" not in item
+                        assert server.url_count(path) == 0
+                        call("approve", item["id"], "--hash", "0" * 64, expected=1)
+                        assert server.url_count(path) == 0
+                        decide(item)
+                    complete(run)
+                    item = json_call("tools", run["id"], "--json")[0]
+                    assert item["state"] == "completed" and server.url_count(path) == 1
+                    assert item["blobID"] == hashlib.sha256(WEB_MARKDOWN.encode()).hexdigest()
+                    assert server.count(scenario) == 2
+                check("URL reads follow all four permission modes; no request before exact approval and raw bytes are retained")
+
+                for scenario in ("fetch-denied", "fetch-cancel-approval"):
+                    run, _, _ = begin(scenario, chat_profile, "requestApproval")
+                    item = pending(run, "fetch_url")
+                    if scenario == "fetch-denied":
+                        decide(item, yes=False)
+                        complete(run)
+                    else:
+                        cancel(run)
+                        call("approve", item["id"], "--hash", item["requestHash"], expected=1)
+                    assert server.url_count("/web/" + scenario) == 0
+                    assert "blobID" not in json_call("tool", item["id"], "--json")
+                check("denied and cancelled URL approvals perform no network request")
+
+                for scenario in ("fetch-html", "fetch-truncated", "fetch-http-error", "fetch-binary",
+                                 "fetch-login", "fetch-large", "fetch-chunk-limit"):
+                    run, _, _ = begin(scenario, chat_profile, "fullAccess")
+                    complete(run)
+                    item = json_call("tools", run["id"], "--json")[0]
+                    assert item["state"] == ("completed" if scenario in {"fetch-html", "fetch-truncated"} else "failed")
+                    assert server.url_count("/web/" + scenario) == 1
+                assert server.url_count("/web/unexpected-subresource") == 0
+                check("HTML extraction and bounded previews preserve source evidence; HTTP, login, media and size failures remain failures")
+
+                run, _, _ = begin("fetch-redirect", chat_profile, "requestApproval")
+                original = pending(run, "fetch_url")
+                decide(original)
+                target = wait_for(lambda: next((item for item in json_call("tools", run["id"], "--json")
+                    if item["callID"] == "fetch_redirect_target" and item["state"] == "pendingApproval"), None), "redirect target approval")
+                assert server.url_count("/web/redirect-target") == 0
+                assert target["requestHash"] != original["requestHash"]
+                decide(target)
+                complete(run)
+                assert server.url_count("/web/redirect-target") == 1
+                assert [item["state"] for item in json_call("tools", run["id"], "--json")] == ["failed", "completed"]
+                check("redirects require a new URL invocation and approval; cookies and credentials never cross requests")
+
+                run, _, _ = begin("fetch-cancel", chat_profile, "fullAccess")
+                wait_for(lambda: server.url_count("/web/fetch-cancel") == 1, "document download start")
+                cancel(run)
+                assert server.fetch_closed.wait(3), "URLSession did not close cancelled document download"
+                assert server.count("fetch-cancel") == 1
+                check("run cancellation closes an in-flight document download without a successful retrieval")
 
                 for old_mode in ("manual", "plan", "dontAsk"):
                     call("run", "--session", run["sessionID"], "--provider", chat_profile, "--permission", old_mode,

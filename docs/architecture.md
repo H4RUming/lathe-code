@@ -340,6 +340,12 @@ child마다 지침/파일 근거/결과 artifact를 전달하며 opaque reasonin
 검색 integration의 인증·네트워크 정책은 모델 provider와 별도이며 code/web/tool 결과 형식을 혼합하지 않는다.
 검색 결과·본문·인용은 실제 retrieval receipt에 연결하며 source URL을 임의 생성하지 않는다.
 
+현재 `fetch_url`은 LatheTools의 격리된 URLSession GET과 로컬 HTML 추출기를 사용한다.
+효과는 read이며 fullAccess/acceptEdits에서 자동, autoApprove/requestApproval에서 접속 전에 승인한다.
+모델 연결의 키·쿠키는 공유하지 않는다. redirect는 자동 추적하지 않고 별개 호출로 현재 정책을 다시 적용한다.
+원문은 blob, 추출문과 URL·상태·시각·hash는 결과/history에 보존한다. 실제 구현 한도와 남은 범위는
+[URL 문서 읽기](coding-preview.md#url-문서-읽기)를 따른다.
+
 `MCPSetupService`는 LatheExtensions에서 사용자 GitHub/Markdown/설치 문서를 읽고 기존 서버 도입을 위한
 ExtensionChangePlan을 만든다. 적합성·source revision·runtime/dependency·설정 diff·검증 방법을 기록한다.
 기존 package 설치와 source build는 지원하지만 새 MCP 서버 scaffold·adapter·도구 구현의 제작은 제외한다.

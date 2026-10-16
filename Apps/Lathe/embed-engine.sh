@@ -33,3 +33,7 @@ fi
 cp "$runner_binary" "$helper_directory/lathe-runner"
 chmod 755 "$helper_directory/lathe-runner"
 /usr/bin/codesign --force --sign - "$helper_directory/lathe-runner"
+
+notice_directory="$TARGET_BUILD_DIR/$CONTENTS_FOLDER_PATH/Resources/ThirdPartyNotices"
+mkdir -p "$notice_directory"
+cp "$repository_root/ThirdPartyNotices/SwiftSoup-LICENSE.txt" "$notice_directory/SwiftSoup-LICENSE.txt"

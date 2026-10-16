@@ -17,6 +17,9 @@ let package = Package(
         .executable(name: "lathe-engine", targets: ["LatheEngine"]),
         .executable(name: "lathe", targets: ["LatheCLI"]),
     ],
+    dependencies: [
+        .package(url: "https://github.com/scinfu/SwiftSoup.git", exact: "2.14.2"),
+    ],
     targets: [
         .target(name: "LatheDomain", dependencies: ["LatheLocalization"]),
         .target(name: "LatheLocalization", resources: [.process("Resources")]),
@@ -25,7 +28,7 @@ let package = Package(
         .target(name: "CLatheExecution", publicHeadersPath: "include"),
         .target(name: "LatheExecution", dependencies: ["CLatheExecution", "LatheLocalization"]),
         .target(name: "LatheProviders", dependencies: ["LatheDomain", "LatheLocalization"]),
-        .target(name: "LatheTools", dependencies: ["LatheDomain", "LatheExecution", "LatheLocalization"]),
+        .target(name: "LatheTools", dependencies: ["LatheDomain", "LatheExecution", "LatheLocalization", "SwiftSoup"]),
         .executableTarget(name: "LatheRunner", dependencies: ["LatheExecution", "LatheLocalization"]),
         .target(name: "LathePersistence", dependencies: ["LatheDomain", "CSQLite", "LatheLocalization"]),
         .target(name: "LatheRuntime", dependencies: ["LatheDomain", "LathePersistence", "LatheProviders", "LatheTools", "LatheLocalization"]),

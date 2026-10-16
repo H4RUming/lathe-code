@@ -327,7 +327,8 @@ private struct ToolInvocationView: View {
         let _ = languages.preferences
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Label(invocation.name, systemImage: invocation.name == "run_command" ? "terminal" : "doc.text")
+                Label(invocation.name, systemImage: invocation.name == "run_command" ? "terminal" :
+                    invocation.name == "fetch_url" ? "globe" : "doc.text")
                     .font(.callout.weight(.semibold))
                 Spacer()
                 Text(status).font(.caption).foregroundStyle(.secondary)

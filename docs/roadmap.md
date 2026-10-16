@@ -77,7 +77,7 @@ idle 창 닫기/종료는 프로세스·socket을 정리하고, 작업 중에는
 
 **구현된 첫 묶음:** Responses/Chat 스트리밍 adapter, 네이티브 연결 설정과 endpoint에 묶인 Keychain 키,
 앱 runtime과 개발 client의 공통 loop, Full access/Auto approve/Accept edits/Request approval, 정확한 요청 hash에 대한 일회 승인,
-list/read/write/edit/run_command, 제한된 파일명·내용 검색, 부분 편집 제안 미리보기,
+list/read/write/edit/run_command, 제한된 파일명·내용 검색, 부분 편집 제안 미리보기, 인증 없는 URL 문서 읽기,
 SHA precondition과 변경 전/결과 blob, 비대화형 native runner,
 취소·불명확한 실행 복구·자동 replay 금지. 최대 단계·호출 수 등 기본 한도를 적용한다.
 기본 앱은 mock이며 저장된 연결을 선택해야 실제 도구가 동작한다.
@@ -238,6 +238,8 @@ Swift 앱의 runtime에 실제 Responses/Chat adapter와 도구 승인·파일·
 SHA에 고정한 단일 파일 부분 치환과 모델 제안 미리보기도 연결했다. 실제 파일 내용은 승인 후 검증하며
 LAT-TOOL-003의 다중 파일 patch/move/delete와 전체 diff·되돌리기는 남아 있다.
 다음은 M1의 코드 검색 확장·웹 검색, patch·전체 diff, 실행 profile과 테스트 증거, 예산·모델 capability다.
+`fetch_url`의 HTML/Markdown/텍스트/JSON 조회·원문 보존·출처 receipt도 연결했다. redirect는 별도 호출로
+재평가하며 인증·JS 렌더링·PDF/이미지·웹 검색 backend·MCP 설치는 아직 구현하지 않았다.
 LLDB launch/attach timeout은 별도 미완료 게이트로 남기며 debugger 제품 연결 전에 해결한다.
 sandbox probe 통과를 production 격리 완료로 확대하지 않는다.
 HTTP fixture와 원격 vLLM 한 구성의 왕복 검증을 다른 서비스·모델의 호환성이나 M1 전체 완료로 확대하지 않는다.

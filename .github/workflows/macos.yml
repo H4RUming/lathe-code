@@ -41,6 +41,7 @@ jobs:
         run: |
           test -x .build/macos/Lathe.app/Contents/Helpers/lathe-runner
           test ! -e .build/macos/Lathe.app/Contents/Helpers/lathe-engine
+          cmp ThirdPartyNotices/SwiftSoup-LICENSE.txt .build/macos/Lathe.app/Contents/Resources/ThirdPartyNotices/SwiftSoup-LICENSE.txt
       - name: Relocated app and helper localization
         run: python3 Scripts/smoke-localization.py --bin-dir .build/macos
       - name: Native app ownership and lifecycle smoke

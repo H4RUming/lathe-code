@@ -17,6 +17,10 @@ public enum PolicyEngine {
     /// Unknown paths, configuration, credentials and executable files ask first.
     private static func isLowRisk(_ prepared: PreparedTool) -> Bool {
         switch prepared.operation {
+        case .fetch:
+            // An arbitrary URL can disclose its path/query to public or private
+            // services. The initial classifier has no trusted network allowlist.
+            return false
         case .search:
             // Unknown descendants may contain credentials, executable files or
             // configuration even beneath an otherwise ordinary source directory.

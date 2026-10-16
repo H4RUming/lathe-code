@@ -10,7 +10,7 @@
 SwiftUI/AppKit 앱 프로세스 안의 EngineHost가 runtime, SQLite와 blob 저장소를 소유한다.
 개발용 CLI는 실행 중인 앱에 연결하는 선택 도구이며 일반 배포/설치 구성 요소가 아니다.
 기본 mock은 외부 API나 파일 도구를 호출하지 않는다. 실제 연결을 고르면 Responses 또는 Chat API와
-list/read/write/edit/run_command와 파일명·내용 검색을 사용한다. Google·Claude 전용 adapter, 웹 검색·MCP·Ultra·편집기·디버거는 후속이다.
+list/read/write/edit/run_command와 파일명·내용 검색, URL 문서 읽기를 사용한다. Google·Claude 전용 adapter, 웹 검색·MCP·Ultra·편집기·디버거는 후속이다.
 프로젝트를 선택하는 것만으로 파일 수집이나 스크립트 실행을 시작하지 않는다.
 
 | 관련 요구사항 | 현재 구현 | 남은 범위 |
@@ -18,7 +18,7 @@ list/read/write/edit/run_command와 파일명·내용 검색을 사용한다. Go
 | LAT-CORE-001/002/006 | 실제 단일 모델/tool loop, 스트림·취소·재접속 | steering·retry·질문·context 관리 확대 |
 | SESSION 계열 | 세션/run/event, context blob, 중복 submit 방지·복구 | fork/rewind/archive/export·실패한 작업 재개 |
 | UI/CLI 계열 | 네이티브 연결 설정·Keychain 입력·승인 카드·부분 편집 제안 미리보기·개발 client 공통 연결 | 편집기/PTY/전체 diff/전체 결과 조회·접근성 검증 확대 |
-| TOOL/EXEC/PERM 기반 | 일곱 도구·bounded 코드 검색·정확한 부분 치환·SHA 사전조건·일회 승인·runner journal | 정규식/ignore·웹 검색·다중 파일 patch/move/delete·실행 profile·production 격리·background |
+| TOOL/EXEC/PERM 기반 | 여덟 도구·bounded 코드 검색·URL 문서 읽기·정확한 부분 치환·SHA 사전조건·일회 승인·runner journal | 정규식/ignore·웹 검색·인증/브라우저 조회·다중 파일 patch/move/delete·실행 profile·production 격리·background |
 
 일부 구현은 각 LAT 요구사항의 전체 수용 기준 통과를 뜻하지 않는다.
 
@@ -65,7 +65,9 @@ OS가 소유하는 기본 메뉴 항목과 패널 내부 문구는 운영체제�
 
 최소 deployment target은 **macOS 15.0**, Swift 언어 모드는 **6**이다.
 Swift 6을 제공하는 Xcode와 해당 Command Line Tools를 선택한다.
-외부 Swift 패키지는 없으며 시스템 SQLite와 macOS Keychain을 사용한다.
+시스템 SQLite와 macOS Keychain을 사용한다. HTML 파서는 SwiftSoup 2.14.2를 exact version과
+Package.resolved commit으로 고정한다. 첫 빌드에는 GitHub에서 이 의존성을 내려받을 네트워크가 필요하다.
+MIT 고지는 `ThirdPartyNotices/SwiftSoup-LICENSE.txt`에 보존하며 앱의 Resources/ThirdPartyNotices에도 포함한다.
 
 ```sh
 Scripts/build-app.sh
@@ -206,6 +208,12 @@ context는 바로 앞 완료 run의 동일 profile snapshot만 이어간다. 실
 자동 compaction, token·비용 budget, 저장 데이터 retention과 checkpoint 복원은 아직 없다.
 
 ## 검증과 한계
+
+2026-10-16 URL 읽기 검증: 코어 148개·앱 상태 30개 테스트, 네이티브 빌드와 HTTP fixture 20개가 통과했다.
+네 권한 모드·정확한 hash 승인 전 접속 없음·거절/취소 후 무접속·원문 SHA 보존·HTML 추출·본문 잘림,
+HTTP/로그인/미지원 형식/크기 오류, 별도 redirect 대상 승인과 실제 다운로드 취소를 확인했다.
+HTTP fixture는 인증 없는 localhost 합성 모델·문서 서버이며 실제 인터넷 사이트의 호환성 검증과 구분한다.
+523개 번역 key 일치·placeholder·하드코딩 검사와 앱에 포함된 SwiftSoup MIT 고지 일치도 확인했다.
 
 2026-10-16 부분 편집 검증: 코어 131개·앱 상태 30개 테스트, 네이티브 빌드와 HTTP fixture 15개가 통과했다.
 정확한 UTF-8 bytes·겹친 중복·빈 대체 문자열·SHA 충돌·승인 전 무읽기·승인 후 원본 저장·취소를 확인했다.

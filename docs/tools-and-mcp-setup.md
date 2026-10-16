@@ -2,8 +2,11 @@
 
 요구사항 수정: 2026-10-16. **아래는 목표 계약이며 전체 구현을 뜻하지 않는다.**
 현재 코드 검색은 `find_files`의 파일명 glob과 `search_content`의 일반 문자열 검색을 제공한다.
-정규식·전체 ignore·LSP, 웹 검색과 MCP 기능은 후속이다. 실제 한도·권한·제외 범위는
+`fetch_url`은 HTTP(S) HTML·Markdown·텍스트·JSON 읽기를 제공한다. 인증 없는 격리된 GET,
+5 MiB·30초 제한, 원문 blob과 조회 증거를 제공하며 redirect는 별도 도구 호출로 다시 권한을 평가한다.
+정규식·전체 ignore·LSP, 웹 검색 backend와 MCP 기능은 후속이다. 실제 한도·권한·제외 범위는
 [현재 코드 검색 계약](coding-preview.md#프로젝트-코드-검색)을 따른다.
+[현재 URL 읽기 계약](coding-preview.md#url-문서-읽기)은 위 목표 계약의 부분 구현이며 브라우저·검색·MCP 설치 지원을 뜻하지 않는다.
 [아키텍처](architecture.md)의 앱 내부 Swift runtime·ToolBroker·PolicyEngine과 [확장 계약](extensions.md)의 E/N/U 등급을 따른다.
 [기능 명세](features.md)의 LAT-MCP-001~008과 [확장 계약](extensions.md)의 X9를 구체화한다.
 사용자가 GitHub 저장소, Markdown 파일, 설치 문서 링크를 주면 agent가 내용을 읽고 적합성을 판단하여

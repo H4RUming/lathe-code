@@ -52,7 +52,10 @@ Chat 서버가 반환하는 `reasoning` 및 이전 형식 `reasoning_content`는
 재귀 검색은 하위 파일을 미리 분류할 수 없으므로 `autoApprove`에서도 매번 승인한다.
 `fullAccess`와 `acceptEdits`에서는 읽기 도구로 자동 실행하고, `requestApproval`에서는 승인한다.
 
-현재 제공하는 도구는 일곱 개다.
+URL 읽기도 `fullAccess`·`acceptEdits`에서는 자동 실행한다. `autoApprove`는 임의 네트워크 주소를
+낮은 위험으로 분류하지 않으므로 승인하고, `requestApproval`도 접속 전에 승인한다.
+
+현재 제공하는 도구는 여덟 개다.
 
 | 도구 | 계약 |
 | --- | --- |
@@ -63,6 +66,7 @@ Chat 서버가 반환하는 `reasoning` 및 이전 형식 `reasoning_content`는
 | `write_file` | 이전 SHA-256 또는 생성용 `missing` 필수. 전체 인자 JSON 32 KiB 안에서 파일 전체를 atomic replace/create한다. 상위 폴더는 이미 있어야 한다. |
 | `edit_file` | 기존 파일의 SHA-256과 `oldText`/`newText`를 받아 정확히 한 곳을 치환한다. 일치 없음·복수 일치·변경된 파일은 거절한다. |
 | `run_command` | 절대 실행 파일·문자열 argv·workspace 상대 cwd·0.1~120초 timeout. 입력을 닫는 비대화형 실행, stdout/stderr 합계 128 KiB 한도. |
+| `fetch_url` | HTTP(S) URL 하나를 인증·쿠키 없이 읽는다. 5 MiB·30초 제한, HTML/Markdown/일반 텍스트/JSON, 출처·원문 해시·제한된 본문을 반환한다. |
 
 파일 도구는 경로 traversal, symlink, hardlink, `.git`, 엔진 데이터 접근을 거절한다. 열린 directory FD를
 기준으로 상대 경로를 걷고 쓰기 직전 SHA를 다시 검사한다. 쓰기 승인 결정 뒤 실행 직전에 기존 파일의
@@ -76,6 +80,47 @@ write lease로 보호한다.
 표시한다. 파일 도구의 경로 제한이 shell에 적용되는 것은 아니다. 환경은 고정 system `PATH`와 `LANG`만
 명시하고 부모 API 키를 상속하지 않는다. 개발 도구별 환경 profile, 사용자 PATH 선택, 대화형 터미널은 후속이다.
 낮은 수준의 runner는 PTY를 지원하지만 현재 모델 도구와 앱에는 PTY 화면·입력 세션이 연결되어 있지 않다.
+
+## URL 문서 읽기
+
+`fetch_url`은 `url`만 받으며 HTTP 또는 HTTPS 절대 URL이어야 한다. 원본과 정규화한 URL은 각각
+8192 UTF-8 bytes 이하이고 URL 내부 자격 증명, fragment, 제어 문자와 역슬래시는 받지 않는다.
+scheme·host는 소문자로, 빈 path는 `/`로 정규화한 주소에 접속하며 응답 URL도 이 주소와 비교한다.
+localhost·LAN·외부 주소를 모두 지원한다. HTTP로 요청한 주소는 암호화되지 않는다.
+URL의 경로와 query는 대상 서버로 전송되며 모델 연결의 주소·API 키와는 별개다.
+준비 단계는 URL과 workspace 메타데이터만 검사한다. DNS·접속·본문 읽기는 현재 모드의 승인 이후 시작한다.
+
+한 호출은 격리된 ephemeral URLSession의 GET 하나다. 쿠키·캐시·저장된 인증 정보·모델 API 키를
+전달하지 않으며 인증 challenge는 처리하지 않는다(TLS 서버 인증은 시스템 검증을 사용한다).
+3xx는 `redirect` 실패 receipt와 검증된 `redirectURL`을 반환하고 자동으로 따라가지 않는다.
+모델이 이동 대상을 읽으려면 다른 `fetch_url` 호출로 같은 권한 평가를 거쳐야 한다. 따라서 승인 요청
+모드에서는 새 주소를 다시 승인하고 전체 권한에서는 새 호출이 자동 실행된다. 각 receipt의
+`redirectChain`은 빈 배열이며, 전체 경로는 별개의 invocation 기록으로 연결한다.
+
+다운로드 한도는 URL당 5 MiB, 요청 전체 30초다. Content-Length와 수신 중 byte 수를 모두 확인한다.
+한도 초과·timeout·취소 시 요청을 닫고 일부 다운로드를 완전한 문서로 반환하지 않는다.
+HTTP 오류, 알려진 로그인 폼·password 입력, 빈 본문, 미지원 MIME·인코딩은 성공 문서와 구분한다.
+로그인 감지는 제한된 규칙이며 모든 challenge/paywall을 알아내는 기능은 아니다. 반환된 내용은
+실제 받은 페이지의 텍스트이며 그 페이지 뒤의 원래 문서에 접근했다는 보장은 없다.
+
+허용 MIME은 `text/html`, `text/plain`, `text/markdown`, `text/x-markdown`, `application/json`이다.
+UTF-8과 실제 US-ASCII만 허용하며, 누락 charset은 유효한 UTF-8을 요구한다. BOM은 추출문에서만
+제거하고 원문 bytes는 그대로 저장한다. 잘못된 문자·binary control을 대체 문자로 보정하지 않는다.
+HTML은 고정 버전 SwiftSoup로 로컬 파싱하여 제목과 본문을 추출한다. script/style/template/noscript/
+SVG/iframe/object는 제외하고 JavaScript·이미지·스타일·링크는 실행하거나 내려받지 않는다.
+본문 구조 한도는 `<` 50,000개, 방문 node 100,000개, 깊이 128이다. HTML 파싱 자체는 동기식이며
+파싱 전후와 텍스트 순회 중 취소를 검사한다. 본문 추출은 브라우저 렌더링·본문 의미 이해와 별개다.
+
+결과는 `sourceURL`, `finalURL`, HTTP 상태, 조회 시각, 원문 SHA-256·byte 수, 추출 방식과
+`untrusted: true`를 포함한다. 원문은 invocation blob으로 저장하고, 모델에는 처음 최대 16 KiB의
+추출문을 JSON 전체 48 KiB 안에서 전달한다. 원문 길이·반환 길이·`truncated`로 생략을 표시한다.
+HTML 링크는 원본 URL 기준으로 해석하며 `<base>`를 무시한다. 최대 30개·링크별 URL 2048 bytes/
+라벨 256 bytes, JSON 링크 목록 12 KiB로 제한하고 `linksTruncated`를 표시한다.
+`linkedPagesFetched: false`로 링크 발견과 본문 조회를 구분한다. 조회한 문서의 설치 명령은
+참고 데이터이며 사용자 요청·권한 모드를 바꾸지 않는다.
+
+이것은 LAT-TOOL-011의 첫 구현이다. 검색어로 웹을 찾는 backend, 로그인, JS 렌더링, PDF·이미지
+다운로드, 저장된 원문 재조회 UI, 전체 redirect chain의 단일 receipt와 MCP 설치·활성화는 후속이다.
 
 ## 정확한 부분 편집과 제안 미리보기
 
@@ -211,6 +256,9 @@ redirect 거절을 포함한다. 네 권한 모드 변경 후에는 localhost fi
 네 모드의 파일명 검색 → 내용 검색 → 일치 파일 읽기 왕복, Auto 재귀 검색 승인·거절 시 비노출,
 UTF-8·페이지·작업량 한도·root 교체·링크 차단을 포함한다. 이 검색 검증은 실제 외부 모델을 사용하지 않았다.
 부분 편집 추가 후에는 코어 131개·앱 상태 30개와 HTTP fixture 15개 검사가 통과했다.
+URL 읽기 추가 후에는 코어 148개·앱 상태 30개와 HTTP fixture 20개 검사가 통과했다.
+URL 검사는 네 모드의 승인 전 접속 방지, 원문 보존, HTML 추출과 출력 한도, 오류 응답·로그인 화면·binary·
+크기 초과의 실패 구분, redirect 대상의 별도 승인, 실제 다운로드 취소를 확인했다. 공개 사이트 실검증은 포함하지 않는다.
 읽기 → 정확한 부분 치환 → 재확인의 네 모드 왕복, 잘못된 승인 hash, 거절·취소·외부 변경·모호한 치환 시
 원본 보존과 미리보기의 상태·표시 한도를 확인했다. 부분 편집도 외부 모델 실검증과 구분한다.
 네이티브 앱에서도 연결 저장, 프로젝트 열기, fixture의 파일 수정·명령 실행 일회성 승인과 최종 응답을 확인했다.
@@ -221,7 +269,7 @@ UTF-8·페이지·작업량 한도·root 교체·링크 차단을 포함한다. 
 명령 stdout·stderr·exit code와 도구 완료 상태를 확인했다. [실제 서버 검사 범위](probes/provider.md)를 따른다.
 **OpenAI 계정·Ollama 및 다른 서버·모델 구성은 미검증이다.** 한 구성의 성공을 전체 호환성으로 확대하지 않는다.
 
-다음 M1 작업은 코드 검색의 정규식·ignore 확장, 웹 검색/본문 읽기, patch/move/delete와 전체 diff, 실행 profile·테스트 증거,
+다음 M1 작업은 코드 검색의 정규식·ignore 확장, 웹 검색 backend·문서 조회 확장, patch/move/delete와 전체 diff, 실행 profile·테스트 증거,
 실행 예산과 모델 capability·Off/On 제어다. Google AI Studio·Vertex·Claude 전용 API와 Ollama native API,
 MCP·Skills·Hooks·Ultra, 편집기와 디버거는 별도 후속 단계다. sandbox probe는 production 격리가 아니며
 LLDB 실제 launch/attach timeout 게이트는 여전히 미완료다.
