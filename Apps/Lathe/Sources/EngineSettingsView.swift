@@ -35,7 +35,7 @@ struct EngineSettingsView: View {
         Form {
             Section(L10n.text("settings.language.section")) {
                 Picker(L10n.text("settings.language.app"), selection: Binding(
-                    get: { languages.preferences.appLanguage }, set: languages.setAppLanguage
+                    get: { languages.preferences.appLanguage }, set: { languages.setAppLanguage($0) }
                 )) {
                     Text(L10n.text("settings.language.system")).tag(AppLanguage.system)
                     Text(L10n.text("settings.language.korean")).tag(AppLanguage.ko)
@@ -43,7 +43,7 @@ struct EngineSettingsView: View {
                 }
                 Text(L10n.text("settings.language.appHelp")).font(.caption).foregroundStyle(.secondary)
                 Picker(L10n.text("settings.language.errors"), selection: Binding(
-                    get: { languages.preferences.errorLanguage }, set: languages.setErrorLanguage
+                    get: { languages.preferences.errorLanguage }, set: { languages.setErrorLanguage($0) }
                 )) {
                     Text(L10n.text("settings.language.followApp")).tag(ErrorLanguage.followApp)
                     Text(L10n.text("settings.language.system")).tag(ErrorLanguage.system)
