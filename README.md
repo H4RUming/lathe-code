@@ -33,6 +33,10 @@ Xcode에서는 `Apps/Lathe/Lathe.xcodeproj`의 **Lathe** scheme을 실행합니�
 백그라운드에서는 앱이 계속 실행되며 메뉴 막대에서 다시 열거나 종료할 수 있습니다. 별도 상주 엔진·로그인 agent·시스템 CLI를 설치하지 않습니다.
 배포물은 `Lathe.app` 하나이며 실행 helper도 앱 안에 들어 있습니다.
 
+권한은 **전체 권한 / 자동 승인 / 편집 허용 / 승인 요청** 네 가지입니다. 전체 권한은 추가 승인 없이,
+자동 승인은 낮은 위험만 자동으로, 편집 허용은 읽기·쓰기만 자동으로 진행합니다. 기본인 승인 요청은
+읽기·쓰기·실행 모두 먼저 확인합니다. 계획 수립은 권한 모드와 별개입니다.
+
 개발 검증이 필요할 때만 `Scripts/build-app.sh --developer-tools`로 CLI와 독립 테스트 engine을
 추가 빌드합니다. 개발 CLI의 기본 동작은 실행 중인 앱에 연결하는 것이며 앱을 대신해 daemon을 시작하지 않습니다.
 테스트 명령과 opt-in harness 사용법은 [개발 가이드](docs/development.md)에 있습니다.
@@ -48,15 +52,16 @@ Xcode에서는 `Apps/Lathe/Lathe.xcodeproj`의 **Lathe** scheme을 실행합니�
 - [설정·Skills·Hooks·MCP·Plugins 호환 계약](docs/extensions.md)
 - [프로바이더와 원격 모델 연결](docs/providers.md)
 - [추론 단계와 Ultra 다중 에이전트](docs/reasoning-and-ultra.md)
-- [검색 도구와 MCP 자동 설정·제작](docs/tools-and-mcp-authoring.md)
+- [검색 도구와 MCP 문서 기반 설치·설정](docs/tools-and-mcp-setup.md)
 - [실행 환경·테스트·디버거 계약](docs/execution-and-debugging.md)
 - [기능 누락 점검과 보완 우선순위](docs/functional-gap-audit.md)
 - [구현 순서와 변경별 커밋 계획](docs/roadmap.md)
 
 로컬·개인 서버 모델에는 `Off / On / Ultra`를 제공할 계획입니다. Ultra는 추론을 켠
 여러 에이전트가 조사·구현·검증을 분담하는 실행 방식입니다. 클라우드 모델의 고유 추론
-옵션은 별도로 보존합니다. 검색과 MCP는 모델 연결과 독립적이며, MCP 서버의 제작·테스트·
-등록·사용까지 사용자가 맡긴 범위 안에서 자동으로 이어가는 것이 목표입니다.
+옵션은 별도로 보존합니다. 검색과 MCP는 모델 연결과 독립적입니다. 사용자가 준 GitHub·Markdown·
+설치 문서를 읽고 **기존 MCP와 관련 설정을 설치·구성·검증·적용**하는 흐름을 구현할 계획입니다.
+의존성 설치나 기존 서버 build는 포함하며 새로운 MCP 서버 제작은 범위에 포함하지 않습니다.
 
 개인 사용과 GitHub 소스 배포를 우선합니다. 빌드의 최소 버전은 macOS 15이며,
 SwiftUI와 AppKit으로 네이티브 UI를 구성합니다. 최소 OS에서의 실행 검증은 별도로 추적합니다.

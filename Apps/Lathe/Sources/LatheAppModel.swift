@@ -60,7 +60,7 @@ final class LatheAppModel: ObservableObject {
     @Published private(set) var earlierCursor: UUID?
     @Published private(set) var profiles: [ProviderProfile] = []
     @Published var selectedProfileID: UUID?
-    @Published var permissionMode: PermissionMode = .manual
+    @Published var permissionMode: PermissionMode = .requestApproval
     @Published private(set) var toolInvocations: [UUID: [ToolInvocationSnapshot]] = [:]
     @Published private(set) var decidingApprovals: Set<UUID> = []
     @Published private(set) var isSavingProfile = false

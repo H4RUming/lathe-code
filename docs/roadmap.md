@@ -4,7 +4,7 @@
 현재 실행 방법과 검증 범위는 [개발 가이드](development.md)와 [첫 코딩 흐름](coding-preview.md)을 따른다. M2 이후는 목표 범위다.
 [기능 요구사항](features.md)의 LAT-* ID와 [확장 계약](extensions.md)의 X1–X9를 구현·검증에 연결한다.
 전체 구조는 [architecture.md](architecture.md), 모델 연결은 [providers.md](providers.md)를 따른다.
-[추론·Ultra](reasoning-and-ultra.md)와 [도구·MCP 제작](tools-and-mcp-authoring.md)의 상세 검증도 포함한다.
+[추론·Ultra](reasoning-and-ultra.md)와 [도구·MCP 설치](tools-and-mcp-setup.md)의 상세 검증도 포함한다.
 [실행·디버깅](execution-and-debugging.md)과 [누락 점검](functional-gap-audit.md)의 보완 항목도 같은 완료 게이트에 포함한다.
 
 ## 1. 변경과 커밋 규칙
@@ -34,7 +34,7 @@ API key·access token·개인 프로젝트·실제 대화는 fixture/커밋에 �
 | M1 | 실제 단일 agent coding loop·검색 | M0 | CORE, TOOL-001~012, EXEC 기반, PERM, PROVIDER-006, REASON 기반 | 코드/웹 탐색→profile 실행·테스트→설명, 승인/취소/한도 |
 | M2 | 세션·변경 관리·실행/디버거 코어 | M1 | SESSION, CTX, GIT-001~005, WORKSPACE, EXEC/DEBUG | resume/복구, 여러 root·worktree 준비, 실제 DAP·테스트 증거 |
 | M3 | 모든 provider·추론·context | M1, M2 | PROVIDER 전체, REASON-001/002/006/007 단일 agent, TOOL-013~014 | tool/비텍스트 왕복·native 옵션·Off/On·context/프로필 갱신 |
-| M4 | 설정·확장·MCP 제작 | M1~M3 | MEM, MCP, EXT, 확장 X1~X4/X6/X9 | client/server·서버 제작·이미지 결과·plugin 의존성까지 실제 사용 |
+| M4 | 설정·확장·MCP 설치 | M1~M3 | MEM, MCP, EXT, 확장 X1~X4/X6/X9 | client/server·기존 서버 설치·이미지 결과·plugin 의존성까지 실제 사용 |
 | M5 | Ultra·병렬 agent·workflow | M2~M4 | TASK, REASON 전체, X5/X7 | 추론 활성 child/team, server queue/worktree/budget, resume/cancel |
 | M6 | 네이티브 작업 환경·자동화 | M2~M5 | UI/CLI, TOOL-013~014, CORE-008, TASK-008~009, GIT-006 | PTY·preview·side chat·goal·schedule·연동 |
 | M7 | 원격 실행·서비스/실험 기능 | 관련 기반 | INTEGRATION, X7/X8 | SSH/remote control/cloud·채널 등 각각 독립 검증 |
@@ -76,7 +76,7 @@ idle 창 닫기/종료는 프로세스·socket을 정리하고, 작업 중에는
 ### M1 — 공통 coding loop
 
 **구현된 첫 묶음:** Responses/Chat 스트리밍 adapter, 네이티브 연결 설정과 endpoint에 묶인 Keychain 키,
-앱 runtime과 개발 client의 공통 loop, Manual/Accept edits/Plan/Don't ask, 정확한 요청 hash에 대한 일회 승인,
+앱 runtime과 개발 client의 공통 loop, Full access/Auto approve/Accept edits/Request approval, 정확한 요청 hash에 대한 일회 승인,
 list/read/write/run_command, SHA precondition과 변경 전/결과 blob, 비대화형 native runner,
 취소·불명확한 실행 복구·자동 replay 금지. 최대 단계·호출 수 등 기본 한도를 적용한다.
 기본 앱은 mock이며 저장된 연결을 선택해야 실제 도구가 동작한다.
@@ -89,7 +89,7 @@ token/비용 budget·steering·Off/On capability는 남았다. 아래 목록과 
 - 선택 모델의 native 추론/Off·On capability와 요청 snapshot. Ultra UI는 M5 검증 전 미지원으로 표시.
 - ModelStep/ToolInvocation 상태 머신, cancellation·budget·질문/steering mailbox.
 - provider final/clientTools/serverContinuation/blocked/truncated/empty 상태, hosted tool 중복 실행 방지.
-- ToolBroker/PolicyEngine: 읽기·Manual/Accept edits/Plan/Don't ask, approval grant.
+- ToolBroker/PolicyEngine: 읽기·Full access/Auto approve/Accept edits/Request approval, approval grant.
 - list/search/read와 ignore/encoding/output 한도.
 - URL fetch·독립 검색 backend 첫 구현, 출처/필터/한도/실패 계약. local LLM 검색 왕복을 함께 검증.
 - create/edit/patch/move/delete, precondition·intent journal·기본 snapshot/diff.
@@ -146,16 +146,16 @@ E2E-26은 모든 adapter의 대표 blocked/empty/continuation/context/profile �
 - X4: MCP stdio/Streamable HTTP/legacy SSE, tools/resources/prompts, OAuth/elicitation/cancel.
 - X4: ToolSearch/schema 지연 로드·revision 재검사, MCP 검색 backend와 builtin registry 연결.
 - X4: MCP image/resource typed content 왕복과 Lathe stdio server 모드·외부 client 연결(E2E-27).
-- X9: 자연어 MCP 설정·server scaffold·build/test·등록/활성화·진단/rollback. 사용자 출처 scope grant와 실행 증거 보존.
+- X9: 사용자 GitHub/Markdown/설치 문서 읽기·판단, 기존 package/dependency 설치·필요한 기존 build, 설정·검증·적용·진단/rollback. 사용자 출처 scope grant와 실행 증거 보존.
 - X6: plugin/marketplace manifest, source pin, 설치/비활성/업데이트/rollback.
 - X6: 전이 dependency graph·version 제약·cycle·공유 의존성/disable/remove·전체 graph rollback(E2E-28).
 - X6: LSP process/capability, 진단/정의/참조와 patch broker를 통한 workspace edit.
-- M1의 승인 모드 확대: explicit bypass 및 별도 Auto reviewer. reviewer 검증 전 Auto 비활성.
+- 네 권한 모드의 효과별 분류·승인 회귀를 확장한다. Auto의 결정 규칙과 이유를 검증하며 자유형 AI reviewer 구현 완료로 표시하지 않는다.
 
 게이트: 실제 프로젝트 설정과 fixture plugin으로 skill→MCP→편집→hook→LSP 흐름을 두 provider에서 실행한다.
 unsupported 필드가 필요한 component는 실행하지 않고 명확히 표시한다.
-E2E-20/21에서 기존 서버 연결과 새 서버 제작을 실제 호출까지 완료한다. 위임 범위 내 단계별 재승인은 없고
-권한 확대·secret 부재·OAuth 상호작용을 필요한 경계에서만 기다린다. 실패한 업데이트는 정상 revision을 유지한다.
+E2E-20/21에서 사용자 문서 링크를 읽고 기존 서버 설치·설정·검증·적용을 실제 호출까지 완료한다.
+네 권한 모드에 맞게 승인하고 유효한 정확한 승인은 중복 요청하지 않는다. 새 범위·secret 부재·OAuth 상호작용은 필요한 입력에서 기다린다. 실패한 업데이트는 정상 revision을 유지한다.
 
 ### M5 — 병렬 실행
 
@@ -210,15 +210,15 @@ Claude의 전용 계정 서비스에 임의 provider key로 접속할 수 있다
 | --- | --- |
 | Provider contract | byte 분할/UTF-8/JSON, 다중 tool, signature, incomplete/EOF/cancel |
 | Reasoning/Ultra | 실제 control payload, unsupported/ignored 옵션, 역할 인계, root budget, 공유 서버 큐, writer/취소/복구 |
-| Policy contract | deny/ask/allow, hook 인수 수정·재귀, 승인 hash, scope, child 권한, 잘못된 설정의 마지막 정상 revision, startup trust/Plan barrier |
+| Policy contract | deny/ask/allow, hook 인수 수정·재귀, 승인 hash, scope, child 권한, 잘못된 설정의 마지막 정상 revision, startup trust/계획 작업 barrier |
 | Workspace | 경로·symlink/hardlink·대소문자·revision conflict·부분 patch |
 | Execution | pipe 폭주, PTY stdin/resize, child group timeout, detach/reconnect |
-| Run/Test/Debug | profile/환경 재현, setup 중간 실패, zero/partial test 결과, 실제 LLDB-DAP/외부 attach/stale handle/Plan |
+| Run/Test/Debug | profile/환경 재현, setup 중간 실패, zero/partial test 결과, 실제 LLDB-DAP/외부 attach/stale handle/계획 작업 |
 | Workspace/Editor | 여러 root의 cwd·정책·Git, 추가/제거·재개, base/buffer/disk 충돌·undo·미저장 복구 |
 | Recovery | journal intent/result crash injection, unknown 외부 효과, migration |
 | Extensions | import/profile/schema, hooks decision, MCP/LSP protocol, plugin lifecycle |
 | 추가 호환성 | launch JSONC/worktree include, plugin dependency graph, MCP 비텍스트·server 모드, 음성 draft |
-| MCP authoring | scoped 위임, build/schema/protocol/agent 왕복, digest/lock 고정, 자동 활성화, grant 철회, rollback |
+| MCP setup | 문서 읽기·출처 판단, 기존 package/build·설정/schema/protocol/agent 왕복, digest/lock 고정, 모드별 승인·적용, grant 철회, rollback |
 | Search | code/web/tool 구분, 실제 근거·필터·quota·출력 제한·부분 실패, local 모델 backend 왕복 |
 | Native UI | IME/VoiceOver/키보드, 긴 transcript, 승인/질문, 창·작업 수명 |
 | Integration | HTTPS/auth/prefix, SSH disconnect, remote MCP, schedule overlap/misfire |

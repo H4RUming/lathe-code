@@ -77,7 +77,11 @@ opt-in 출력에는 `lathe`, `lathe-engine`, `lathe-runner`가 추가된다. 이
 
 실제 모델 설정과 `provider-set`, `tools`, `tool`, `approve/deny --hash` 예시는
 [첫 코딩 흐름](coding-preview.md#개발-client)을 따른다. CLI에서 `--provider`를 생략하면 mock이고,
-실제 모델의 기본 권한은 `dontAsk`다. 승인 모드 `manual/acceptEdits`는 `--detach`가 필요하다.
+실제 모델의 기본 권한은 읽기까지 승인하는 `requestApproval`이다. `requestApproval/autoApprove/acceptEdits`는
+승인 대기가 가능하므로 `--detach`가 필요하며, 명시적으로 선택한 `fullAccess`만 `--detach` 없이 실행할 수 있다.
+Auto는 일반 소스·문서 경로와 인자 없는 `/bin/pwd`에 대한 좁은 결정 규칙이며 그 외 호출은 승인한다.
+Plan은 권한 모드가 아니고 `dontAsk`는 새 실행에서 제공하지 않는다. 이전 `manual/plan/dontAsk` 기록은
+`requestApproval`로 보수적으로 읽으며 실행을 자동 재개하지 않는다.
 
 - `run --detach`는 접수된 run JSON을 반환한다. `cancel RUN_UUID`로 중단한다.
 - `run --json`은 실행 이벤트를 NDJSON으로 출력한다. 이미 종료된 동일 요청은 run snapshot을 반환한다.
@@ -113,7 +117,7 @@ optional dev client ──────────────── local IPC �
 - 종료 시 새 요청 수락을 멈추고 HTTP·runner를 취소/정리한 뒤 socket·lease를 해제한다.
 - profile 메타데이터는 SQLite, 키는 profile ID+Base URL에 묶인 Keychain 항목에 저장한다.
   저장된 키는 화면에 다시 표시하거나 실행 환경에 자동 상속하지 않는다.
-- 변경 전 내용·결과·model context는 SHA-256 blob으로 저장한다. `beforeBlobID`와 결과 `blobID`를 구분한다.
+- 변경 전 파일 내용은 쓰기 승인 결정 후 실행 직전에 읽어 SHA-256 blob으로 저장한다. 결과·model context도 blob으로 보존하며 `beforeBlobID`와 결과 `blobID`를 구분한다.
 - 실행 전 상태와 runner intent를 durable 기록한다. 재시작 시 대기/승인은 취소하고 실행 중 효과는
   `unknown`, 진행 중 run은 `interrupted`로 남기며 모델/도구를 자동 재실행하지 않는다.
 - runner의 process group 정리는 OS sandbox가 아니다. 승인된 명령은 사용자 권한으로 실행한다.
@@ -164,6 +168,11 @@ context는 바로 앞 완료 run의 동일 profile snapshot만 이어간다. 실
 
 ## 검증과 한계
 
+2026-10-16 권한 개편 검증: 코어 84개·앱 모델 19개 테스트, 네이티브 앱 빌드,
+localhost agent fixture 11개와 격리된 실제 앱 수명 검사 4개가 통과했다.
+전체 권한/자동 승인/편집 허용/승인 요청과 읽기 승인 전 비노출·baseline 저장 경계를 포함한다.
+이 검증에는 외부 모델 서비스나 사용자 프로젝트를 사용하지 않았다.
+
 ```sh
 swift test --package-path Packages/LatheKit
 swift test --package-path Apps/Lathe
@@ -199,9 +208,10 @@ HTTPS에서는 `--allow-http`를 생략한다. probe는 최대 180초·8 model s
 - Chat의 `reasoning`과 이전 `reasoning_content`는 원래 필드명을 유지해 다음 도구 왕복에 전달한다.
   두 필드 합산 UTF-8 1 MiB 한도와 잘못된 타입 거절을 검사한다.
 - tool 테스트는 경로·SHA·권한·승인 지연 뒤 cwd 교체·raw byte·timeout·취소·receipt 누락과 journal 재사용 금지를 검사한다.
-- 기존 실제 HTTP 통합 fixture의 9개 검사가 로컬에서 통과했다. 개발 harness의 같은 runtime/CLI/runner를 통해
-  read→승인된 write→승인된 shell→최종 응답, hash 불일치·중복 요청, Plan/dontAsk/거절,
+- 초기 권한 구현 시 실제 HTTP 통합 fixture의 9개 검사가 로컬에서 통과했다. 개발 harness의 같은 runtime/CLI/runner를 통해
+  read→승인된 write→승인된 shell→최종 응답, hash 불일치·중복 요청·권한 거절,
   중간 EOF, 대기·shell·HTTP 취소, Responses reasoning replay, HTTP 307 redirect 거절을 확인했다.
+  네 모드로 바꾼 뒤의 정책·저장 호환·HTTP 왕복 회귀 결과는 변경 후 실행 보고서로 별도 확인한다.
 - 별도 live probe는 원격 vLLM 0.27.1의 Qwen 계열 모델 한 구성에서 6개 검사를 통과했다.
   [실제 서버 검사](probes/provider.md)는 합성 파일 편집과 고정 명령 왕복까지이며 다른 구성, OpenAI 계정과 Ollama는 미검증이다.
   Keychain 구현과 메모리 credential fixture 검증도 실제 사용자 키로 API를 호출한 검증과 구분한다.

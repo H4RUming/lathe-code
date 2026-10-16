@@ -169,9 +169,9 @@ struct LatheCLI {
             let configuration: RunConfiguration?
             if let profileID = try args.uuid("--provider") {
                 guard let profile = try await client.providerProfiles().first(where: { $0.id == profileID }) else { throw LatheError.notFound("Model connection not found.") }
-                guard let mode = PermissionMode(rawValue: args.values["--permission"] ?? "dontAsk") else { throw LatheError.invalidRequest("Invalid permission mode.") }
-                guard args.flags.contains("--detach") || mode == .dontAsk || mode == .plan else {
-                    throw LatheError.invalidRequest("Manual/Accept edits runs require --detach, then approve in the app or with lathe approve. Headless runs default to dontAsk.")
+                guard let mode = PermissionMode(rawValue: args.values["--permission"] ?? "requestApproval") else { throw LatheError.invalidRequest("Permission must be fullAccess, autoApprove, acceptEdits or requestApproval.") }
+                guard args.flags.contains("--detach") || mode == .fullAccess else {
+                    throw LatheError.invalidRequest("This permission mode may request approval. Use --detach, then approve in the app or with lathe approve. The default is requestApproval; fullAccess must be selected explicitly.")
                 }
                 guard let maxSteps = Int(args.values["--max-steps"] ?? "12") else { throw LatheError.invalidRequest("Invalid --max-steps.") }
                 configuration = RunConfiguration(profile: profile, permissionMode: mode, maxSteps: maxSteps)
@@ -295,8 +295,9 @@ struct LatheCLI {
     These opt-in developer tools are not installed or included in the app distribution.
     run: --request-id UUID for an idempotent retry; --json emits NDJSON events.
     run: --provider UUID selects a saved connection; omitted selects mock.
-         --permission manual|acceptEdits|plan|dontAsk (default dontAsk); --max-steps 1...24.
-         Approval modes require --detach; inspect and approve using the app or tool/approve commands.
+         --permission fullAccess|autoApprove|acceptEdits|requestApproval (default requestApproval); --max-steps 1...24.
+         All modes except explicit fullAccess require --detach because they may wait for approval.
+         Inspect and approve exact requests using the app or tool/approve commands.
     Ctrl-C during run cancels that run. Ctrl-C during events only detaches.
     """
 }

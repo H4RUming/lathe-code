@@ -32,10 +32,22 @@ Chat 서버가 반환하는 `reasoning` 및 이전 형식 `reasoning_content`는
 
 | 모드 | 파일 읽기·목록 | 파일 쓰기 | 명령 실행 |
 | --- | --- | --- | --- |
-| `manual` / 수동 승인 | 허용 | 매번 승인 | 매번 승인 |
-| `acceptEdits` / 편집 허용 | 허용 | 허용 | 매번 승인 |
-| `plan` / 계획 | 허용 | 거절 | 거절 |
-| `dontAsk` / 질문 없이 제한 | 허용 | 거절 | 거절 |
+| `fullAccess` / 전체 권한 | 자동 실행 | 자동 실행 | 자동 실행 |
+| `autoApprove` / 자동 승인 | 낮은 위험만 자동, 나머지 승인 | 낮은 위험만 자동, 나머지 승인 | 정확한 허용 목록만 자동, 나머지 승인 |
+| `acceptEdits` / 편집 허용 | 자동 실행 | 자동 실행 | 매번 승인 |
+| `requestApproval` / 승인 요청 | 매번 승인 | 매번 승인 | 매번 승인 |
+
+기본값은 `requestApproval`이다. `fullAccess`는 추가 승인 없이 실행하지만 도구의 경로·입력 검증,
+실행 한도·취소·기록은 유지한다. 계획은 별도 작업 개념이며 권한 선택기에 Plan/Don't ask는 없다.
+이전 저장 기록의 `manual`/`plan`/`dontAsk`는 조회 시 `requestApproval`로 변환하고 자동 재개하지 않는다.
+
+첫 Auto 분류는 결정 규칙이다. root의 일반 소스/문서 파일이나 `src`, `Sources`, `tests`, `docs` 등
+인식한 경로의 일반 파일은 자동 허용할 수 있다. 숨김·설정·자격 증명 관련 경로, 실행 권한이 있는 파일,
+`Package.swift`·`AGENTS.md`·script/hook/build 경로와 분류할 수 없는 경로는 승인한다.
+현재 명령 자동 허용은 **인자 없는 정확한 `/bin/pwd`**뿐이며 shell·build·test·package 설치는 승인한다.
+예를 들어 `src/main.swift`와 `docs/guide.md`는 자동 편집 대상이지만 `.env`, `Package.swift`,
+`settings.json`, `scripts/setup.sh`는 승인 대상이다. 이 규칙은 모든 코드의 위험을 증명하거나
+자유형 AI reviewer의 판단을 제공하지 않는다.
 
 현재 제공하는 도구는 네 개다.
 
@@ -47,8 +59,10 @@ Chat 서버가 반환하는 `reasoning` 및 이전 형식 `reasoning_content`는
 | `run_command` | 절대 실행 파일·문자열 argv·workspace 상대 cwd·0.1~120초 timeout. 입력을 닫는 비대화형 실행, stdout/stderr 합계 128 KiB 한도. |
 
 파일 도구는 경로 traversal, symlink, hardlink, `.git`, 엔진 데이터 접근을 거절한다. 열린 directory FD를
-기준으로 상대 경로를 걷고 쓰기 직전 SHA를 다시 검사한다. 기존 파일의 변경 전 내용과 결과 blob 참조를
-별도로 보존한다. 동일하거나 겹치는 workspace의 파일 쓰기·명령은 엔진의 write lease로 보호한다.
+기준으로 상대 경로를 걷고 쓰기 직전 SHA를 다시 검사한다. 쓰기 승인 결정 뒤 실행 직전에 기존 파일의
+변경 전 내용을 읽어 저장하고 결과 blob 참조와 별도로 보존한다. 승인 전 준비 단계에서는 파일 내용을
+읽거나 baseline blob을 저장하지 않는다. 동일하거나 겹치는 workspace의 파일 쓰기·명령은 엔진의
+write lease로 보호한다.
 충돌 시 대기열에 자동 재시도하지 않고 실패 결과를 모델에 돌려준다.
 외부 편집기의 마지막 검사와 atomic rename 사이 변경까지 원자적 비교·교환으로 막는 것은 아니다.
 
@@ -68,7 +82,7 @@ Chat 서버가 반환하는 `reasoning` 및 이전 형식 `reasoning_content`는
   --base-url http://localhost:8000/v1 --model MODEL_ID --allow-http
 .build/macos/lathe providers --json
 .build/macos/lathe run --workspace "$PWD" --provider PROFILE_UUID \
-  --permission manual --detach '프로젝트를 읽고 필요한 수정과 테스트를 진행해 줘'
+  --permission requestApproval --detach '프로젝트를 읽고 필요한 수정과 테스트를 진행해 줘'
 .build/macos/lathe tools RUN_UUID --json
 .build/macos/lathe tool INVOCATION_UUID --json
 .build/macos/lathe approve INVOCATION_UUID --hash REQUEST_HASH
@@ -83,13 +97,16 @@ Chat 서버가 반환하는 `reasoning` 및 이전 형식 `reasoning_content`는
 독립 CI fixture만 `--developer-engine /absolute/lathe-engine --root /absolute/test-data`를 함께 지정해
 테스트 engine을 시작한다. 기본 client와 앱에는 이 모드를 사용하지 않는다.
 
-`run --provider`를 생략하면 mock이다. 실제 모델의 headless 기본 권한은 `dontAsk`이며 승인 입력을
-기다리지 않는다. `manual`과 `acceptEdits`는 `--detach`가 필요하고 앱 또는 별도의 `approve/deny`
-명령으로 결정한다. `tools`는 프레임 한도 때문에 최근 네 호출만 반환하며 `tool ID`로 개별 조회한다.
+`run --provider`를 생략하면 mock이다. 실제 모델의 기본 권한은 `requestApproval`이며 읽기도 승인한다.
+`requestApproval`·`autoApprove`·`acceptEdits`는 승인 대기가 가능하므로 `--detach`가 필요하고
+앱 또는 별도의 `approve/deny` 명령으로 결정한다. 사용자가 명시적으로 선택한 `fullAccess`만
+`--detach` 없이 진행할 수 있다. headless라는 이유로 모드를 자동 완화하지 않는다.
+`tools`는 프레임 한도 때문에 최근 네 호출만 반환하며 `tool ID`로 개별 조회한다.
 
 ## 기록·취소·복구
 
-SQLite는 승인·실행 상태를 기록한다. 파일 변경 전 blob을 저장하고 실행 상태를 기록한 뒤 효과를 시작한다.
+SQLite는 승인·실행 상태를 기록한다. 쓰기는 승인 결정 이후 실행 직전에 변경 전 파일 blob을 저장하고
+실행 상태를 기록한 뒤 효과를 시작한다. `requestApproval`에서는 읽기 도구의 내용도 승인 후 읽는다.
 명령은 엔진 데이터 아래 invocation별 디렉터리에 request와 runner의 durable intent/events/result를 남긴다.
 blob은 SHA-256 주소로 저장하며 읽을 때 digest를 확인한다. 화면은 결과 일부를 표시하고 전체 raw 출력과
 변경 전 blob을 내려받거나 복원하는 UI는 아직 없다. 저장 정책·자동 삭제·checkpoint 복원도 후속이다.
@@ -113,8 +130,11 @@ helper SIGKILL 뒤 불명확한 효과는 [runner 계약](runner.md)을 따른�
 계약 테스트는 SSE frame 분할·완료/중단 판별·tool 왕복·서명/continuation 보존·redirect 거절,
 권한 결정·경로 우회·SHA 충돌·취소·journal 재사용 금지·복구를 검사한다. 실제 native helper를 이용한
 테스트는 환경 격리·입력 EOF·원시 byte·timeout·취소와 자식 정리를 확인한다.
-실제 URLSession HTTP·engine·CLI·runner를 사용하는 localhost fixture의 9개 검사가 통과했다.
-승인된 read/write/shell 왕복, 취소·거절·truncated EOF, Responses continuation replay와 redirect 거절을 포함한다.
+초기 코딩 흐름에서는 실제 URLSession HTTP·engine·CLI·runner를 사용하는 localhost fixture의
+9개 검사가 통과했다. read/write/shell 왕복, 취소·거절·truncated EOF, Responses continuation replay와
+redirect 거절을 포함한다. 네 권한 모드 변경 후에는 localhost fixture 11개 검사가 통과했다.
+읽기 승인·거절 시 본문 비노출, 승인 전 baseline 비저장, 전체 권한 자동 실행, 편집 허용의 명령 승인,
+자동 승인의 일반 파일·정확한 pwd 허용과 민감 경로·shell 승인, CLI 기본값·구모드 거절을 포함한다.
 네이티브 앱에서도 연결 저장, 프로젝트 열기, fixture의 파일 수정·명령 실행 일회성 승인과 최종 응답을 확인했다.
 이 화면 검증은 격리된 테스트 데이터와 인증 없는 localhost 서버를 사용했다.
 명령과 실행 범위는 [개발 가이드](development.md#검증과-한계)를 따른다.

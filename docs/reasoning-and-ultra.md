@@ -100,7 +100,7 @@ Ultra는 `UltraCoordinator`가 versioned workflow graph를 실행하는 orchestr
 | --- | --- | --- |
 | 0. 준비 | coordinator가 목표·workspace·현재 변경·권한·추론 지원·예산을 확인 | run manifest, baseline revision, 검증 조건, phase graph |
 | 1. 조사 | explorer가 코드·실패 근거 수집; reviewer가 독립 접근·누락 위험 조사 | 경로·line·revision·명령 결과를 포함한 조사 결과와 대안 |
-| 2. 계획 | coordinator가 결과 충돌을 정리하고 구현 범위·task dependency 확정 | 검증 가능한 plan; plan 모드에서는 여기서 검토 대기 |
+| 2. 계획 | coordinator가 결과 충돌을 정리하고 구현 범위·task dependency 확정 | 검증 가능한 plan; 계획만 요청한 작업에서는 여기서 검토 대기하며 권한 모드는 별도로 유지 |
 | 3. 구현 | implementer가 할당한 source 범위에서 수정·필요한 중간 검증 | patch/commit 참조, 변경 이유, 수행한 검사, 미해결 항목 |
 | 4. 독립 검증 | reviewer가 실제 diff 검토; verifier가 테스트·build·재현 수행 | revision에 연결된 findings와 검증 증거; 성공/실패/미실행 구분 |
 | 5. 보완 | coordinator가 채택한 finding을 implementer에게 반환; 영향 검사 재실행 | 수정 revision 및 재검증 결과; 정한 횟수까지만 반복 |

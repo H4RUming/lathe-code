@@ -139,7 +139,7 @@ def main():
                     profile_words.append("--allow-http")
                 profile = call(*profile_words)
                 session = call("new", "--workspace", str(workspace), "Live synthetic probe", "--json")
-                run = call("run", "--session", session["id"], "--provider", profile["id"], "--permission", "manual",
+                run = call("run", "--session", session["id"], "--provider", profile["id"], "--permission", "requestApproval",
                            "--max-steps", "8", "--detach", PROMPT)
                 active_run = run["id"]
                 run_deadline = time.monotonic() + args.timeout
@@ -151,7 +151,11 @@ def main():
                             continue
                         arguments = json.loads(item["arguments"])
                         valid = False
-                        if item["name"] == "write_file":
+                        if item["name"] == "list_directory":
+                            valid = arguments == {"path": "."}
+                        elif item["name"] == "read_file":
+                            valid = arguments == {"path": "source.txt"}
+                        elif item["name"] == "write_file":
                             reads = completed("read_file")
                             valid = (not any(record["name"] == "write_file" and record["id"] in approved for record in observed.values())
                                      and any(json.loads(record["arguments"]) == {"path": "source.txt"} for record in reads)
@@ -164,9 +168,9 @@ def main():
                                                        "workingDirectory": ".", "timeoutSeconds": 10}
                                      and source.read_text(encoding="utf-8") == AFTER)
                         call("approve" if valid else "deny", item["id"], "--hash", item["requestHash"], "--json")
-                        require(valid, "Unexpected mutation denied; probe stopped")
+                        require(valid, "Unexpected tool request denied; probe stopped")
                         approved.add(item["id"])
-                        check("Approved exact synthetic edit" if item["name"] == "write_file" else "Approved exact harmless printf command")
+                        check("Approved exact synthetic tool: " + item["name"])
                     snapshot = call("show", session["id"], "--json")
                     final = next(item for item in snapshot["runs"] if item["id"] == active_run)
                     report["runState"] = final["state"]

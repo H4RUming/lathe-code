@@ -138,7 +138,7 @@ int main(int argc, const char **argv) {
                                  "--model", "fixture-model", "--base-url", f"http://127.0.0.1:{server.server_port}/prefix/v1",
                                  "--allow-http", "--json")["id"]
                     session = js("new", "--workspace", str(workspace), "App lifetime", "--json")["id"]
-                    run = js("run", "--session", session, "--provider", profile, "--permission", "manual",
+                    run = js("run", "--session", session, "--provider", profile, "--permission", "requestApproval",
                              "--detach", "fixture:cancel-shell")
                     invocation = wait_for(lambda: next((item for item in js("tools", run["id"], "--json")
                                                         if item["state"] == "pendingApproval"), None), "shell approval")

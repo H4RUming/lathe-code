@@ -19,7 +19,7 @@ adapter, `LatheTools`의 broker/정책과 네 파일·명령 도구, `LatheExecu
 - [확장 호환 계약](extensions.md): 설정·지침·Skills·Hooks·MCP·plugins·LSP.
 - [프로바이더 계약](providers.md): 서비스별 API, 인증, 외부 모델 서버.
 - [추론과 Ultra](reasoning-and-ultra.md): native 옵션, Off/On/Ultra, 역할·공유 예산·서버 큐.
-- [도구와 MCP 제작](tools-and-mcp-authoring.md): 검색·도구 registry, MCP 설정·제작·검증·활성화.
+- [도구와 MCP 설치](tools-and-mcp-setup.md): 검색·도구 registry, 기존 MCP 설치·설정·검증·적용.
 - [실행·디버깅](execution-and-debugging.md): 실행 profile·환경·테스트 증거·LLDB-DAP.
 - [기능 누락 점검](functional-gap-audit.md): 기준 revision 대비 보완 항목과 우선순위.
 - [구현 계획](roadmap.md): 단계별 기능/커밋/검증 게이트.
@@ -41,7 +41,7 @@ CLI/독립 engine은 개발·검증 harness이며 별도 설치 제품이나 앱
 | 저장 | SQLite WAL + 단일 writer actor, 출력·변경 전 내용·context는 SHA-256 blob. retention/복원은 후속 |
 | 모델 | API 어댑터·인증·capability 분리. 외부 vLLM/Ollama도 동일한 연결 모델 |
 | 추론·Ultra | provider 추론 제어와 다중 agent 실행을 분리. 로컬 모드 Off/On/Ultra는 검증된 두 축의 preset |
-| 검색·MCP | 모델과 독립적인 integration. 사용자가 맡긴 scope 안에서 MCP 제작·검증·활성화까지 자동 진행 |
+| 검색·MCP | 모델과 독립적인 integration. 사용자가 맡긴 scope 안에서 사용자 문서 링크를 읽고 기존 MCP 설치·설정·검증·적용을 선택한 권한 모드로 진행 |
 | Git | 시스템 git. GitHub는 준비된 gh 또는 별도 connector. 인수 배열·명시적 cwd 사용 |
 | 격리 | 승인 정책과 OS sandbox backend 분리. 검증 전에는 격리 완료로 표시하지 않음 |
 | 배포 | 개인 사용·GitHub 소스 제공. 바이너리 배포 시 서명/공증 |
@@ -153,7 +153,7 @@ App은 EngineHost 수명과 Protocol client를 소유하며 개발 CLI는 Protoc
 | ProviderContinuation | connection/model/API identity, opaque blocks, replay constraints |
 | MemoryEntry | scope, source, text, 사용자에게 보이는 revision |
 | ExtensionInstall | source/version/hash, scope, declared effects, compatibility report |
-| ExtensionChangePlan | source revision, 목표 config/code diff, runtime/dependency/network/effects, 검증 결과, 활성 revision |
+| ExtensionChangePlan | 문서/source revision, 기존 서버 설치·config diff, runtime/dependency/network/effects, 검증 결과, 활성 revision |
 | ExtensionChangeAuthorization | 사용자 출처 ApprovalGrant의 scoped subtype. plan 범위·만료·철회·policy revision; agent가 발급 불가 |
 | Schedule | trigger/timezone, workspace, overlap/misfire policy, enabled |
 
@@ -225,39 +225,41 @@ control owner는 하나이며 stoppedGeneration 변경 후 낡은 frame/variable
 debugger 전체 수명 동안 workspace write lease를 잡지 않는다. 실행 중 debuggee의 파일 효과는 process sandbox/별도
 scratch·checkout 정책으로 관리하고, adapter request 종료만으로 debuggee의 쓰기가 끝났다고 보지 않는다.
 owned launch와 external attach는 종료 책임을 분리한다. crash 뒤 PID만으로 재attach하거나 evaluate를 replay하지 않는다.
-상세 capability·Plan 경계·종료 정책은 [실행·디버깅 계약](execution-and-debugging.md)을 따른다.
+상세 capability·계획 작업 경계·종료 정책은 [실행·디버깅 계약](execution-and-debugging.md)을 따른다.
 
 ## 8. 권한·신뢰·격리
 
 | 모드 | Lathe 동작 계약 |
 | --- | --- |
-| Manual (`default`) | 범위 내 읽기/허용 규칙 실행, 나머지는 효과·인수를 보여주고 승인 |
-| Accept edits | 지정 범위 편집 허용, shell/network는 별도 규칙 |
-| Plan | 탐색/읽기/계획만 허용. source write와 임의 shell 차단, 제한된 읽기 executor |
-| Don't ask | 허용된 동작만 수행. 승인 필요 시 구조화된 denial |
-| Auto review | 별도 평가기가 요청·효과 검토. 검증된 reviewer profile 없으면 사용 불가 |
-| Bypass | 사용자가 직접 활성화. 명시적 deny·상호작용 필수 도구·환경 제한 유지 |
+| `fullAccess` | 사용자 요청 범위의 읽기·쓰기·실행을 추가 승인 없이 진행. 입력/경로 검증·OS 권한·한도·기록 유지 |
+| `autoApprove` | 낮은 위험으로 분류한 호출만 자동 실행. 나머지와 분류 불명확 호출은 승인 |
+| `acceptEdits` | workspace 읽기·구조화된 파일 쓰기는 자동 실행, 명령 실행은 승인 |
+| `requestApproval` | 읽기·목록·쓰기·명령 실행 모두 사전 승인. 기본값 |
 
-이는 Lathe의 제안이며 Claude 내부 분류기 판단을 복제한다는 뜻이 아니다. Auto를 무조건 허용 스위치로 구현하지 않는다.
-hard deny → explicit ask → allow → 모드 기본값 순서다. 프로젝트가 자신을 신뢰하거나 bypass를 켤 수 없다.
-복합 shell/substitution/redirect를 단순 prefix만으로 승인하지 않는다. 효과를 해석하지 못하면 ask/deny로 처리한다.
+첫 Auto 분류기는 일반 소스/문서 경로와 좁은 정확한 executable/argv 허용 목록을 사용한다.
+숨김·설정·자격 증명·실행 관련·분류 불명확 경로와 나머지 명령은 승인한다. 자유형 AI reviewer가 아니다.
+모드별 승인 여부보다 먼저 도구 검증·강제 제한을 적용한다. `fullAccess`도 유효하지 않은 경로나 입력,
+OS 권한 거절을 우회하지 않는다. 프로젝트·문서·MCP 출력은 모드나 grant를 바꿀 수 없다.
+복합 shell/substitution/redirect를 단순 prefix만으로 낮은 위험이라고 분류하지 않는다.
 grant는 once/session/workspace 범위이며 바뀐 args/target/policy에 재사용하지 않는다.
-headless에 응답 client가 없으면 needsApproval/needsInput 결과로 종료한다.
+headless에 응답 client가 없으면 needsApproval/needsInput 결과로 종료하며 자동으로 fullAccess를 선택하지 않는다.
+계획 작업은 권한 모드가 아니다. 기존 `manual`/`plan`/`dontAsk` 기록은 읽을 때 `requestApproval`로
+변환하되 자동 실행하지 않고, 새 실행은 네 모드만 저장한다.
 
 workspace 시작 순서는 discovery → 수동적 parse/검증 → trust/activation → executable startup이다.
 SessionStart/Setup hook, skill 전처리, 프로젝트 helper/MCP는 검증된 실행 허가 전 시작하지 않는다.
-MCP 제작/시험은 기존 ExtensionChangeAuthorization을 재검사해 제한된 staging 인스턴스를 임시 허가할 수 있다.
+기존 MCP 설치/시험은 기존 ExtensionChangeAuthorization을 재검사해 제한된 staging 인스턴스를 임시 허가할 수 있다.
 이는 영속 registry 활성화와 별개이며 해당 시험 run 밖에 도구를 노출하지 않고 종료/취소 때 회수한다.
 agent/hook/shell의 실행 설정 변경은 먼저 pending revision이다. 사용자 출처의 `ExtensionChangeAuthorization` 안에서
 검증된 정확한 revision은 PolicyEngine 재검사 후 자동 활성화할 수 있다. grant는 설정 경로·runtime/dependency·
-접속 대상·도구 효과·시간/예산 범위를 고정하며, 사용자가 맡긴 MCP 설정/제작은 이 범위 안에서 계속 진행한다.
+접속 대상·도구 효과·시간/예산 범위를 고정하며, 사용자가 맡긴 기존 MCP 설치/설정은 이 범위 안에서 계속 진행한다.
 기존 grant를 넘는 권한 확대·새 대상은 별도 사용자 결정이 필요하다. agent가 자신의 grant/deny/trust를 변경할 수 없다.
 approval DB·engine 설정/IPC 경로는 일반 file tool 쓰기 대상에서 제외하고 sandbox deny에도 반영한다. 비격리 same-user 프로세스까지 막는다고 주장하지 않는다.
 보안 설정 parse 실패 시 마지막 정상 revision을 유지하거나 관련 실행을 막는다. 최초 보안 설정이 깨졌다면 해당 workspace 실행을 보류한다.
 
-Plan 전환은 실행 barrier다. 세션 소유 writer와 mutation hook/skill 전처리를 중지·대기시키고, MCP write/효과 미확인 호출을 막는다.
-이미 시작한 관련 process의 중지 확인 전에는 Plan 진입 완료로 표시하지 않는다. 필요한 확장 process는 검증된 읽기 전용 환경에서만 계속 사용한다.
-Plan의 보장은 이 세션이 요청한 변경 차단이며, 다른 세션·외부 editor가 프로젝트를 바꾸지 못한다는 전역 파일 격리를 뜻하지 않는다.
+계획만 수행하는 작업으로 전환할 때는 별도 실행 barrier를 적용한다. 세션 소유 writer와 mutation hook/skill 전처리를 중지·대기시키고, MCP write/효과 미확인 호출을 막는다.
+이미 시작한 관련 process의 중지 확인 전에는 계획 작업 전환 완료로 표시하지 않는다. 필요한 확장 process는 검증된 읽기 전용 환경에서만 계속 사용한다.
+계획 작업의 변경 금지 보장은 이 세션이 요청한 변경 차단이며, 다른 세션·외부 editor가 프로젝트를 바꾸지 못한다는 전역 파일 격리를 뜻하지 않는다.
 
 App Sandbox·tool 승인·하위 프로세스 OS sandbox는 서로 다르다.
 GitHub 소스 앱은 개발 도구 접근을 위해 App Sandbox를 사용하지 않는 안이지만 shell sandbox는 별도 필수 기능이다.
@@ -270,7 +272,7 @@ provider key는 shell environment에 자동 상속하지 않으며 provider 네�
 
 ## 9. 변경·checkpoint·Git
 
-- turn 시작에 checkpoint marker, 편집 직전 파일 baseline을 lazy snapshot한다.
+- turn 시작에 checkpoint marker를 남기고 파일 편집의 승인 결정 후 실행 직전에 baseline을 lazy snapshot한다.
 - snapshot은 존재 여부·bytes·mode·hash·workspace를 포함하고 생성/삭제/rename은 manifest로 기록한다.
 - patch는 읽은 파일 hash를 precondition으로 적용 직전 검증한다. 충돌이면 덮어쓰지 않는다.
 - 다중 파일 변경은 preflight+journal을 사용한다. 여러 filesystem write가 DB transaction처럼 원자적이라고 주장하지 않는다.
@@ -329,23 +331,27 @@ child마다 지침/파일 근거/결과 artifact를 전달하며 opaque reasonin
 역할/옵션/예산/queue 상태는 event에 남고, pause/cancel/crash 때 기존 TaskSupervisor와 journal을 사용한다.
 세부 기본값·복구·UI/CLI 옵션 계약은 [추론·Ultra 설계](reasoning-and-ultra.md)를 따른다.
 
-### 도구 registry와 MCP 제작
+### 도구 registry와 MCP 설치
 
 `ToolRegistry`는 builtin·MCP tool의 identity/schema/effect/source revision을, `ToolSearch`는 필요한 도구의
-검색과 schema 지연 로드를 담당한다. skills는 별도 실행 자산이지만 같은 검색 화면에서 유형을 구분해 찾을 수 있다.
+탐색·schema 주입을 담당한다. skills는 별도 실행 자산이지만 같은 검색 화면에서 유형을 구분해 찾을 수 있다.
+`SearchConnection`은 ModelConnection과 독립적이다.
 `SearchService`/`FetchService`는 LatheTools의 port, HTTP/MCP/hosted backend는 주입하는 adapter다.
-검색 integration의 인증과 네트워크 정책은 모델 provider와 별도이며 code/web/tool 검색 결과 형식을 혼합하지 않는다.
+검색 integration의 인증·네트워크 정책은 모델 provider와 별도이며 code/web/tool 결과 형식을 혼합하지 않는다.
+검색 결과·본문·인용은 실제 retrieval receipt에 연결하며 source URL을 임의 생성하지 않는다.
 
-`MCPAuthoringService`는 LatheExtensions에서 ExtensionChangePlan을 만든다. 문서 조사·소스 생성·build/test도
-공통 RunCoordinator/ToolBroker/runner로 수행한다. 별도 셸 우회 통로를 만들지 않는다.
-`MCPManage`/`MCPAuthor`의 복합 호출은 orchestration intent와 grant를 검증·기록하되 workspace write lease를
-잡은 채 child tool을 기다리지 않는다. 실제 파일/설치/등록 leaf마다 필요한 lease를 얻고 해제하며 parent-child
-invocation을 journal에 연결한다. child도 현재 policy·grant를 재검사하고, 부분 실패를 전체 성공으로 처리하지 않는다.
-PolicyEngine이 사용자 출처 grant를 확인하고, MCP registry는 검증한 config/code digest와 runtime/dependency lock을
-활성 revision에 묶는다. 변경 시 revalidate→test→drain old calls→activate new instance 순서로 전환한다.
-실패하면 last-good을 유지하며, 외부 MCP 효과는 config rollback으로 되돌렸다고 표시하지 않는다.
-앱 engine은 Swift이며 제작하는 MCP 서버 runtime은 사용자가 허용한 설치 환경에 따라 선택한다.
-상세 stage·검증·자격 증명·취소 계약은 [도구·MCP 제작 설계](tools-and-mcp-authoring.md)를 따른다.
+`MCPSetupService`는 LatheExtensions에서 사용자 GitHub/Markdown/설치 문서를 읽고 기존 서버 도입을 위한
+ExtensionChangePlan을 만든다. 적합성·source revision·runtime/dependency·설정 diff·검증 방법을 기록한다.
+기존 package 설치와 source build는 지원하지만 새 MCP 서버 scaffold·adapter·도구 구현의 제작은 제외한다.
+문서 읽기·의존성 설치·build·설정 편집·시험도 같은 broker와 선택한 권한 모드를 따른다.
+`MCPManage`/`MCPSetup` 복합 호출은 intent와 grant를 검증·기록하되 workspace write lease를
+장기간 점유하지 않는다. 실제 leaf가 필요한 lease를 얻고 현재 policy를 다시 검사하여 재진입 교착을 피한다.
+parent-child invocation을 journal에 연결하며 부분 실패를 전체 성공으로 처리하지 않는다.
+PolicyEngine이 사용자 출처 grant를 확인하고, MCP registry는 검증한 source/config digest와 dependency lock을
+원자적으로 적용한다. 문서나 설치 script는 자신의 권한을 발급하지 못한다.
+변경 시 revalidate→test→drain old calls→activate new instance 순서로 전환한다.
+실패하면 last-good을 유지하며 원격 MCP 효과를 config rollback으로 되돌렸다고 표시하지 않는다.
+상세 stage·검증·자격 증명·취소 계약은 [도구·MCP 설치 설계](tools-and-mcp-setup.md)를 따른다.
 
 ## 11. 영속성·이벤트·복구
 

@@ -1,6 +1,28 @@
 import Foundation
 
-public enum PermissionMode: String, Codable, CaseIterable, Sendable { case manual, acceptEdits, plan, dontAsk }
+public enum PermissionMode: String, Codable, CaseIterable, Sendable {
+    case fullAccess, autoApprove, acceptEdits, requestApproval
+
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        let value = try container.decode(String.self)
+        // Old read-only modes must never become automatic write/command grants.
+        // Interrupted runs are not resumed; viewing an old snapshot remains safe.
+        switch value {
+        case "manual", "plan", "dontAsk": self = .requestApproval
+        default:
+            guard let mode = Self(rawValue: value) else {
+                throw DecodingError.dataCorruptedError(in: container, debugDescription: "Unknown permission mode: \(value)")
+            }
+            self = mode
+        }
+    }
+
+    public func encode(to encoder: any Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(rawValue)
+    }
+}
 public enum ToolEffect: String, Codable, Sendable { case read, write, shell }
 public enum ToolInvocationState: String, Codable, Sendable {
     case pendingApproval, approved, executing, completed, denied, failed, cancelled, unknown

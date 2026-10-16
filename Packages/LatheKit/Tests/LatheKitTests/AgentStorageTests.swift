@@ -105,7 +105,10 @@ struct AgentStorageTests {
         let session = try store.createSession(title: "tools", workspacePath: fixture.root.path)
         let run = try store.submit(sessionID: session.id, prompt: "test", requestID: UUID()).run
         var snapshot = toolSnapshot(runID: run.id)
+        snapshot.name = "write_file"; snapshot.effect = .write
         snapshot.beforeBlobID = String(repeating: "b", count: 64)
+        #expect(throws: LatheError.self) { try store.saveInvocation(snapshot) }
+        snapshot.beforeBlobID = nil
         try store.saveInvocation(snapshot)
         let before = try store.events(after: 0, sessionID: session.id, limit: 256).nextCursor
         try fixture.raw { database in
@@ -125,6 +128,14 @@ struct AgentStorageTests {
         #expect(throws: LatheError.self) { try store.saveInvocation(changed) }
         snapshot.state = .executing
         try store.saveInvocation(snapshot)
+        snapshot.beforeBlobID = String(repeating: "b", count: 64)
+        try store.saveInvocation(snapshot)
+        #expect(try store.invocation(id: snapshot.id).beforeBlobID == snapshot.beforeBlobID)
+        changed = snapshot
+        changed.beforeBlobID = String(repeating: "c", count: 64)
+        #expect(throws: LatheError.self) { try store.saveInvocation(changed) }
+        changed.beforeBlobID = nil
+        #expect(throws: LatheError.self) { try store.saveInvocation(changed) }
         try store.finish(runID: run.id, state: .cancelled)
         snapshot.state = .completed
         snapshot.output = "Result arrived during cancellation"

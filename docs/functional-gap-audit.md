@@ -35,7 +35,7 @@ P3는 핵심 루프 이후 완성할 입력 편의 기능이다. 모두 미구�
 | G09 / P2 프로필 갱신 | revision은 있으나 alias의 모델 교체·연결 삭제 시 예약/Ultra 역할 참조의 이관 흐름이 없음 | PROVIDER-008: metadata 변화의 stale 처리, 재진단, 영향 참조 표시·명시적 이관, 과거 snapshot 보존 | 다중 provider 필수; M3, M5/M6 소비자 통합 |
 | G10 / P2 미저장 편집 복구 | UI-005가 dirty buffer 충돌을 언급하지만 3-way 선택 적용·undo·crash 후 복구 절차가 없음 | UI-006: base/buffer/disk 비교, stale hunk 거절, 사용자/agent undo 출처, 복구 buffer로 최신 disk를 덮어쓰지 않음 | 네이티브 강화; M2 기반, M6 UI |
 | G11 / P2 plugin 의존성 | bundle 설치/lock은 있으나 plugin 간 전이 dependency·버전 충돌·dependent disable/remove가 없음 | EXT-001: graph resolve/lock, staging 업데이트, 충돌·cycle·공유 의존성·이전 정상 graph 보존 | parity; M4/X6 |
-| G12 / P2 MCP server 모드 | MCP client와 서버 제작은 있으나 Lathe의 기존 도구를 다른 client에 제공하는 모드가 없음 | MCP-010: 로컬 stdio→같은 broker/journal, tool subset·무인 승인 오류·재귀/취소 검사 | parity, 정책 차이는 N; M4/X4 |
+| G12 / P2 MCP server 모드 | MCP client와 기존 서버 설치·설정은 있으나 Lathe의 기존 도구를 다른 client에 제공하는 모드가 없음 | MCP-010: 로컬 stdio→같은 broker/journal, tool subset·무인 승인 오류·재귀/취소 검사 | parity, 정책 차이는 N; M4/X4 |
 | G13 / P3 음성 입력 | VoiceOver는 있으나 녹음→전사→draft 편집 흐름이 없음 | UI-007: 전사 backend 분리, 마이크 거부/취소/실패·기존 draft 보존·명시적 전송 | parity, 전사 서비스는 별도; M6 |
 
 각 표의 짧은 ID는 `LAT-` 접두사를 사용한다. 새 E2E-22~29는 실행 환경, 디버거,
@@ -47,7 +47,7 @@ P3는 핵심 루프 이후 완성할 입력 편의 기능이다. 모두 미구�
   test/build artifact, debug control owner, stop generation, expression 효과, 외부 attach의 detach 기본값.
 - [프로바이더](providers.md): 정상 응답과 작업 완료의 분리, hosted continuation, 실제 context,
   metadata 변경·검증 무효화·참조 이관, 도구 이미지의 provider별 전달.
-- [도구·MCP](tools-and-mcp-authoring.md): 비텍스트 결과 보존·이미지 왕복과 외부 client용 server 모드.
+- [도구·MCP](tools-and-mcp-setup.md): 비텍스트 결과 보존·이미지 왕복과 외부 client용 server 모드.
 - [확장](extensions.md): launch/include 입력 호환과 plugin 간 dependency graph의 전체 수명.
 - [아키텍처](architecture.md): root별 identity/lease, 실행/디버깅 상태 owner, buffer revision/복구,
   composite orchestration이 child를 기다리며 전체 write lease를 점유하지 않는 규칙.
@@ -60,7 +60,7 @@ engine 발급 ingress identity로 보완하고 수용 시나리오에 넣었다.
 
 터미널·파일 편집·실행·로그 분석 자체는 빠진 기능이 아니다. PTY, 중단/취소, background process,
 checkpoint/rewind, Git/worktree, LSP, 사용자 질문, plan, 권한, skills/hooks/plugins,
-검색·MCP 제작, Ultra·예약·원격 실행은 기존 요구사항에 이미 있다. 실제로 동작하는지는 구현 뒤 검증해야 한다.
+검색·기존 MCP 설치·설정, Ultra·예약·원격 실행은 기존 요구사항에 이미 있다. 실제로 동작하는지는 구현 뒤 검증해야 한다.
 
 추가로 앱이 vLLM/Ollama를 직접 설치하거나 모델 파일을 내려받는 기능은 이번 필수 누락으로 판정하지 않았다.
 사용자가 운영하는 localhost/LAN/외부 서버에 연결하는 원래 범위는 유지하며 모델 관리자 제품까지 자동 확대하지 않는다.

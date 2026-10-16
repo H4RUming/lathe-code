@@ -38,7 +38,7 @@ SessionStart/Setup hook, 프로젝트 인증 helper, 동적 skill 전처리, std
 임시 허가는 시험 run·도구·효과·수명에 한정하며 영속 registry 활성화와 별개다. 일반 세션에는 아직 공개하지 않는다.
 agent/hook/shell이 변경한 실행 설정은 pending revision으로 검사한다. 사용자 출처의 유효한
 `ExtensionChangeAuthorization`에 포함된 변경은 시험·정책 재검사 후 정확한 revision을 자동 활성화한다.
-이 위임은 사용자가 맡긴 MCP 설정/제작의 대상·runtime/dependency·접속·효과·예산 범위를 고정한다.
+이 위임은 사용자가 맡긴 기존 MCP 설치/설정의 대상·runtime/dependency·접속·효과·예산 범위를 고정한다.
 grant 밖의 실행/권한 확대는 사용자 결정이 필요하다. agent가 grant를 발급하거나 자신의 deny/trust를 바꾸지 못한다.
 승인 DB·engine 설정/IPC 경로는 file tool과 검증된 sandbox의 직접 쓰기 대상에서 제외한다.
 비격리 same-user process까지 이 규칙만으로 OS 수준에서 막는다고 주장하지 않는다.
@@ -233,7 +233,7 @@ invocation 계약:
   hook 내부 실행은 정책·journal·sandbox 검사를 유지하되 stack의 같은 hook/lifecycle을 다시 발행하지 않는다.
   다른 hook chain에도 깊이·횟수 제한을 둔다. 부모 도구의 결과를 저장하고 write lease를 해제한 뒤 post hook을 기다리며,
   hook 쓰기는 자신의 lease를 얻어 재진입 교착을 막는다.
-- Plan에서는 mutation hook·동적 skill 전처리·MCP write/효과 미확인 호출을 비활성화한다.
+- 계획만 요청한 작업에서는 mutation hook·동적 skill 전처리·MCP write/효과 미확인 호출을 비활성화한다. 이는 권한 모드와 별도인 작업 제약이다.
   이미 실행 중인 세션 소유 writer/process는 중지·대기 barrier를 통과해야 한다. 필요한 확장 process는
   검증된 읽기 전용 환경에서만 유지한다. 다른 editor/세션까지 파일을 동결하는 보장은 아니다.
 
@@ -260,7 +260,7 @@ Lathe 구현 계약:
 - `name`, `description`, `tools`, `disallowedTools`, `model`, `permissionMode`, `maxTurns`,
   `skills`, `mcpServers`, `hooks`, `memory`, `background`, `isolation`을 우선 구현한다.
   snapshot의 나머지 필드도 X7에서 지원 여부를 닫고 U 항목을 남기면 호환 완료가 아니다.
-- permission은 부모가 실제로 허용한 범위와 자식 제한의 교집합이다. `bypassPermissions` 등
+- permission은 부모가 실제로 허용한 범위와 자식 제한의 교집합이다. native 모드는 fullAccess/autoApprove/acceptEdits/requestApproval 네 가지다. `bypassPermissions` 등
   위험도가 달라지는 값을 가져오면 변환 결과를 표시하고 사용자 설정 없이 자동 활성화하지 않는다.
 - 재사용 가능한 모델 이름은 `ModelAliasMap`으로 해석한다. `inherit`는 시작 시 부모의 profile revision을 캡처한다.
 - 지정한 skills를 preload하고 source revision을 기록한다. 실행 권한과 model-only/user-only 규칙을 생략하지 않는다.
@@ -315,18 +315,20 @@ cancel은 request ID에 연결한 protocol cancellation을 보낸다. 뒤늦게 
 재전송하지 않는다. 서버가 취소를 무시할 수 있으므로 `cancel requested`와 실행 효과를 구분한다.
 [MCP cancellation](https://modelcontextprotocol.io/specification/2025-11-25/basic/utilities/cancellation)
 
-### 자연어 설정과 서버 제작
+### 사용자 문서로 기존 서버 설치·설정
 
-MCP 지원 범위에는 기존 서버 사용과 함께 자연어 연결 설정, 필요한 서버의 scaffold/구현/build/test,
-등록·활성화·실제 호출·진단·업데이트가 포함된다. [도구·MCP 제작 계약](tools-and-mcp-authoring.md)이
-stage·산출물·검증을 정의하며 `LAT-MCP-001~008`, `X9`, `E2E-20/21`로 추적한다.
-사용자에게 이미 맡겨진 scope 안에서는 설정·제작·검증·활성화를 이어가고 매 단계 확인을 요구하지 않는다.
-누락한 credential과 외부 OAuth 상호작용, 허용 범위 밖의 효과만 필요한 시점에 요청한다.
+사용자가 GitHub 저장소·Markdown·설치 문서 링크를 주면 원문을 읽고 목적·지원 환경·설치법을 판단해
+기존 MCP 또는 관련 설정을 설치·구성·검증·적용한다. 기존 dependency 설치·source build는 포함하고
+새 서버 scaffold·adapter·도구 소스 제작은 포함하지 않는다. [도구·MCP 설치 계약](tools-and-mcp-setup.md)이
+단계·설치 receipt·검증을 정의하며 `LAT-MCP-001~008`, `X9`, `E2E-20/21`로 추적한다.
+선택한 네 권한 모드와 사용자 scope를 유지한다. 이미 유효한 정확한 승인을 중복 요청하지 않지만
+설치 문서에 적힌 실행 예시나 권한 요구를 인간 승인으로 취급하지 않는다.
+새 secret·OAuth 상호작용·추가 범위가 필요한 단계는 그 입력이나 결정에서 기다린다.
 
 ToolSearch는 등록된 도구를 검색하고 선택 schema만 로드한다. 웹 검색과 프로젝트 코드 검색은 별도 도구다.
 도구를 찾았다는 사실은 실행 권한이 아니며 연결·schema revision과 실제 인자를 ToolBroker에서 다시 확인한다.
-서버가 만든 설정이나 자체 test 성공 주장으로 활성화하지 않는다. engine이 code/config digest와 검증 결과를 묶고
-사용자 출처 grant 및 현재 policy와 대조한다. `.claude` 원본 대신 `.lathe` 설정으로 등록하는 기본 규칙도 유지한다.
+서버가 만든 설정이나 자체 test 성공 주장으로 활성화하지 않는다. runtime이 설치 artifact/config digest와
+검증 결과를 묶어 사용자 출처 grant 및 현재 policy와 대조한다. `.claude` 원본 대신 `.lathe` 설정으로 등록한다.
 
 위 링크의 2025-11-25 protocol은 baseline 참조다. 이후 protocol은 version 협상·capability·fixture를 추가해
 지원 상태를 승격한다. 선택 SDK가 지원하는 version과 최신 specification을 같다고 가정하지 않는다.
@@ -431,9 +433,9 @@ E/N/U 판정, 적용 결과, 수정 방법, 구현 milestone을 기록한다.
   전체 enabled로 표시하지 않고 `partially enabled`와 제외 항목을 유지한다.
 - 신뢰할 수 없는 project 파일은 approval DB에 직접 쓰지 못한다. skill/agent/hook/shell이 만든
   실행 설정은 pending revision으로 검사하며 사용자 출처 위임 범위 안에서만 자동 활성화한다.
-  실제 권한 확대는 새로운 사용자 결정이 필요하며 MCP 제작 요청을 무제한 권한 위임으로 해석하지 않는다.
-- 이미 허용된 범위에 매번 재승인을 요구하지 않는다. 위임 안의 새 코드도 digest 고정·시험·정책 검사를 거친다.
-  위임 밖의 실행 코드·접속 대상·권한 범위만 사용자 검토 대상으로 만든다. grant 철회/만료/Plan 전환은 진행 중 작업에도 적용한다.
+  실제 권한 확대는 새로운 사용자 결정이 필요하며 MCP 설치 요청을 무제한 권한 위임으로 해석하지 않는다.
+- 이미 허용된 범위에 매번 재승인을 요구하지 않는다. 위임 안의 기존 서버 package/build 산출물과 설정도 digest 고정·시험·정책 검사를 거친다.
+  위임 밖의 실행 코드·접속 대상·권한 범위는 새 사용자 결정이 필요하며, 위임 안에서도 선택한 모드의 승인 절차를 적용한다. grant 철회/만료/계획 작업 전환은 진행 중 작업에도 적용한다.
 
 ## 10. 필수 마일스톤과 검증
 
@@ -453,7 +455,7 @@ OAuth와 remote MCP는 M4의 integration 지원이며, remote workspace 실행�
 | X6 | plugins·marketplaces·LSP | dependency graph 설치·disable·update·rollback과 진단/탐색; `feat(plugins): manage versioned extension packages` |
 | X7 | 확장 고급 호환성 | 나머지 lifecycle, prompt/agent/mcp_tool hooks, workflows·monitors·styles·mods bridge와 MCP client capability; 기능별 커밋 |
 | X8 | 전체 호환성 gate | 아래 fixture·통합 시나리오와 미지원 inventory 검토, 사용자에게 정확한 지원표 제공 |
-| X9 | MCP 자동 설정·제작 | 위임→scaffold/build→protocol/agent 왕복 시험→등록/활성화→진단/rollback; `feat(mcp): build and activate servers within delegated scope` |
+| X9 | MCP 문서 기반 설치·설정 | 사용자 링크 읽기·판단→기존 package/dependency 설치 또는 build→설정→protocol/agent 왕복→적용·진단/rollback; `feat(mcp): install and configure existing servers from documentation` |
 
 X4는 X3, X5와 일부 병렬 개발할 수 있지만 활성화·권한·취소 primitive는 공유한다.
 plugin runtime을 먼저 만들고 나중에 권한을 붙이지 않는다.
@@ -473,8 +475,8 @@ source URL, 확인일, 검증한 CLI 버전 또는 `docs-only`, Lathe schema ver
   invalid output, late async result, Stop 재진입, 사용자 중지 우선.
 - MCP: 모의 stdio/HTTP 서버, pagination·schema 변경, OAuth 만료, elicitation 거절,
   remote disconnect, late response, 재전송 금지, server restart.
-- MCP 제작: 위임 범위 자동 활성화, source/config digest 교체, dependency 실패, schema/protocol 오류,
-  실제 새 도구 왕복, grant 만료/철회·Plan 전환, last-good rollback, 자동 권한 확대 거절.
+- MCP 설치: GitHub/Markdown 문서 읽기·적합성 판단, 기존 package/source/config digest 고정, dependency/build 실패,
+  schema/protocol 오류, 기존 도구 왕복, 네 모드 승인, grant 만료/철회·계획 작업 전환, last-good rollback, 문서의 권한 확대 거절.
 - subagent: 부모/자식 권한 교집합, 미지원 모델 alias, partial/resume, 취소 전파,
   write lease와 worktree의 사용자 변경 보존.
 - plugin/LSP: source pin, archive escape, 변경된 manifest, rollback, 누락 executable,

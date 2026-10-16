@@ -188,12 +188,18 @@ public final class SQLiteStore {
                 guard previous.runID == snapshot.runID, previous.callID == snapshot.callID,
                       previous.name == snapshot.name, previous.arguments == snapshot.arguments,
                       previous.requestHash == snapshot.requestHash, previous.summary == snapshot.summary,
-                      previous.effect == snapshot.effect, previous.createdAt == snapshot.createdAt,
-                      previous.beforeBlobID == snapshot.beforeBlobID else {
+                      previous.effect == snapshot.effect, previous.createdAt == snapshot.createdAt else {
                     throw LatheError.conflict("저장된 도구 요청의 내용은 변경할 수 없습니다.")
                 }
                 if previous == snapshot { return }
-                guard !isTerminal(previous.state), validTransition(from: previous.state, to: snapshot.state) else {
+                var withBaseline = previous
+                withBaseline.beforeBlobID = snapshot.beforeBlobID
+                let capturesBaseline = previous.state == .executing && snapshot.effect == .write &&
+                    previous.beforeBlobID == nil && snapshot.beforeBlobID != nil && snapshot == withBaseline
+                guard previous.beforeBlobID == snapshot.beforeBlobID || capturesBaseline else {
+                    throw LatheError.conflict("기존 파일 원본은 승인 후 실행 중 한 번만 기록할 수 있습니다.")
+                }
+                guard !isTerminal(previous.state), capturesBaseline || validTransition(from: previous.state, to: snapshot.state) else {
                     throw LatheError.conflict("종료된 도구를 다시 실행하거나 상태를 되돌릴 수 없습니다.")
                 }
                 guard run.state == .running || isTerminal(snapshot.state) else {
@@ -205,6 +211,9 @@ public final class SQLiteStore {
                 }
                 guard snapshot.state == .pendingApproval || snapshot.state == .approved || snapshot.state == .denied else {
                     throw LatheError.invalidRequest("도구 실행은 권한 결정부터 기록해야 합니다.")
+                }
+                guard snapshot.beforeBlobID == nil else {
+                    throw LatheError.invalidRequest("승인 전 도구 요청에 기존 파일 원본을 저장할 수 없습니다.")
                 }
                 guard try integer(query("SELECT COUNT(*) FROM tool_invocations WHERE run_id = ?", [.text(snapshot.runID.uuidString)])[0][0]) < 64 else {
                     throw LatheError.invalidRequest("한 실행에서 도구 요청은 최대 64개입니다.")

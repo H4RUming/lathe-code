@@ -237,10 +237,9 @@ private struct ComposerView: View {
                     ForEach(model.profiles) { profile in Text(profile.name).tag(Optional(profile.id)) }
                 }.frame(maxWidth: 330)
                 Picker("도구 권한", selection: $model.permissionMode) {
-                    Text("수동 승인").tag(PermissionMode.manual)
-                    Text("편집 허용").tag(PermissionMode.acceptEdits)
-                    Text("계획 · 읽기만").tag(PermissionMode.plan)
-                    Text("질문 없이 제한").tag(PermissionMode.dontAsk)
+                    ForEach(PermissionMode.allCases, id: \.rawValue) { mode in
+                        Text(permissionTitle(mode)).tag(mode)
+                    }
                 }.disabled(model.selectedProfile == nil)
                 SettingsLink { Image(systemName: "gearshape") }.help("모델 연결 설정")
             }.disabled(!model.canChangeRunConfiguration)
@@ -290,10 +289,19 @@ private struct ComposerView: View {
 
     private var permissionDescription: String {
         switch model.permissionMode {
-        case .manual: "읽기는 허용하며 파일 변경과 명령 실행은 매번 승인합니다."
-        case .acceptEdits: "프로젝트 파일 편집은 자동 허용하며 명령 실행은 매번 승인합니다."
-        case .plan: "프로젝트 읽기만 허용합니다. 편집과 명령 실행은 거절합니다."
-        case .dontAsk: "프로젝트 읽기만 허용하며 승인이 필요한 도구는 질문 없이 거절합니다."
+        case .fullAccess: "읽기·쓰기·명령 실행을 추가 승인 없이 허용합니다."
+        case .autoApprove: "위험이 낮은 읽기와 편집은 자동 승인하며 그 밖의 작업은 실행 전에 승인을 요청합니다."
+        case .acceptEdits: "읽기와 파일 편집은 자동 승인하며 명령 실행은 승인을 요청합니다."
+        case .requestApproval: "읽기·쓰기·명령 실행을 포함한 모든 도구에 실행 전 승인을 요청합니다."
+        }
+    }
+
+    private func permissionTitle(_ mode: PermissionMode) -> String {
+        switch mode {
+        case .fullAccess: "전체 권한"
+        case .autoApprove: "자동 승인"
+        case .acceptEdits: "편집 허용"
+        case .requestApproval: "승인 요청"
         }
     }
 }
@@ -327,7 +335,7 @@ private struct ToolInvocationView: View {
                     Button("거절") { model.decideApproval(invocation, approved: false) }
                     Button("이번 한 번 허용") { model.decideApproval(invocation, approved: true) }
                         .buttonStyle(.borderedProminent)
-                }.disabled(!model.isConnected || !runIsActive || model.decidingApprovals.contains(invocation.id))
+                }.disabled(!model.acceptsUserActions || !model.isConnected || !runIsActive || model.decidingApprovals.contains(invocation.id))
             } else {
                 DisclosureGroup("요청 인자") {
                     Text(invocation.arguments).font(.caption.monospaced()).textSelection(.enabled)

@@ -8,7 +8,7 @@ public struct RunConfiguration: Codable, Sendable, Equatable {
     public let maxSteps: Int
     public let approvalTimeoutSeconds: Double
 
-    public init(profile: ProviderProfile? = nil, permissionMode: PermissionMode = .manual,
+    public init(profile: ProviderProfile? = nil, permissionMode: PermissionMode = .requestApproval,
                 maxSteps: Int = 12, approvalTimeoutSeconds: Double = 300) {
         self.profile = profile; self.permissionMode = permissionMode
         self.maxSteps = maxSteps; self.approvalTimeoutSeconds = approvalTimeoutSeconds

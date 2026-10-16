@@ -132,10 +132,10 @@ continue/step/restart/종료 시 generation을 무효화하고 늦게 도착한 
 DAP의 중단 상태 reference 수명은 재개 시 끝난다. [공식 reference 수명](https://microsoft.github.io/debug-adapter-protocol/overview#lifetime-of-objects-references)
 
 evaluate·condition·logpoint expression·getter/formatter는 실행 코드나 부수효과를 포함할 수 있다.
-inspection과 arbitrary evaluation을 분리하며 Plan/읽기 전용 모드에서 임의 expression 실행·메모리 변경을 허용하지 않는다.
+inspection과 arbitrary evaluation을 분리하며 계획만 요청한 작업의 읽기 전용 제약에서는 임의 expression 실행·메모리 변경을 허용하지 않는다.
 안전성이 입증되지 않은 자동 hover/watch/getter 평가도 실행 효과로 취급하고 기존 grant·시간·출력 제한을 적용한다.
 `readOnly` 표시만으로 실제 부수효과 없음이 증명되었다고 간주하지 않는다.
-Plan 진입은 launch/continue/step/evaluate 등 실행 제어를 차단하고 세션이 소유한 debuggee의 중지/정지 상태를
+계획 작업으로 전환할 때는 launch/continue/step/evaluate 등 실행 제어를 차단하고 세션이 소유한 debuggee의 중지/정지 상태를
 확인하는 barrier를 거친다. pause만으로 이미 발생한 파일 효과를 되돌렸다고 표시하지 않는다.
 외부 attach 대상은 다른 사용자의 실행이므로 임의 종료하지 않는다. detach 뒤 그 대상의 지속 실행은
 Lathe 세션의 읽기 전용 보장 밖이며, 외부 프로세스까지 정지시켰다고 주장하지 않는다.

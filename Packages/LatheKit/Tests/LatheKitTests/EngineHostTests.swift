@@ -101,7 +101,7 @@ struct EngineHostTests {
             let session = try await client.createSession(title: "cleanup", workspacePath: fixture.workspace.path)
             let profile = ProviderProfile(name: "fixture", api: .openAIChat, baseURL: "https://fixture.invalid/v1", model: "fixture")
             _ = try await client.saveProviderProfile(profile)
-            _ = try await client.submitConfigured(sessionID: session.id, prompt: "wait", configuration: .init(profile: profile, permissionMode: .plan))
+            _ = try await client.submitConfigured(sessionID: session.id, prompt: "wait", configuration: .init(profile: profile, permissionMode: .requestApproval))
             try await waitForHostCondition { await transport.started }
             let first = Task { await host.stop() }
             try await waitForHostCondition { await transport.cleanupStarted }
@@ -178,7 +178,7 @@ struct EngineHostTests {
             let session = try await client.createSession(title: "runner shutdown", workspacePath: fixture.workspace.path)
             let profile = ProviderProfile(name: "fixture", api: .openAIChat, baseURL: "https://fixture.invalid/v1", model: "fixture")
             _ = try await client.saveProviderProfile(profile)
-            let run = try await client.submitConfigured(sessionID: session.id, prompt: "run", configuration: .init(profile: profile, permissionMode: .manual))
+            let run = try await client.submitConfigured(sessionID: session.id, prompt: "run", configuration: .init(profile: profile, permissionMode: .requestApproval))
             try await waitForHostCondition { try await client.invocations(runID: run.id).first?.state == .pendingApproval }
             let invocation = try #require(try await client.invocations(runID: run.id).first)
             _ = try await client.decideApproval(invocationID: invocation.id, requestHash: invocation.requestHash, approved: true)

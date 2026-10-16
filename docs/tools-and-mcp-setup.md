@@ -1,11 +1,13 @@
-# 도구·검색·MCP 자동 구성과 서버 제작
+# 도구·검색·MCP 설치와 설정
 
-설계·공식 문서 확인: 2026-10-15. **아래 기능은 구현 전 요구사항이다.**
-[아키텍처](architecture.md)의 Swift engine·ToolBroker·PolicyEngine과 [확장 계약](extensions.md)의 E/N/U 등급을 따른다.
+요구사항 수정: 2026-10-16. **아래 검색·MCP 기능은 구현 전 요구사항이다.**
+[아키텍처](architecture.md)의 앱 내부 Swift runtime·ToolBroker·PolicyEngine과 [확장 계약](extensions.md)의 E/N/U 등급을 따른다.
 [기능 명세](features.md)의 LAT-MCP-001~008과 [확장 계약](extensions.md)의 X9를 구체화한다.
-목표는 사용자가 작업을 말하면 agent가 필요한 도구를 찾고, 연결하고, 부족한 MCP 서버를 만들어 실제 작업까지 완료하는 것이다.
-MCP 사용뿐 아니라 자동 구성·제작·검증·활성화도 필수 범위이며, shell 명령 안내만 반환하는 것으로 완료하지 않는다.
-Claude Code도 공식 MCP 문서에서 서버 제작 skill과 HTTP/stdio scaffold를 제공한다. [공식 MCP 가이드](https://code.claude.com/docs/en/mcp)
+사용자가 GitHub 저장소, Markdown 파일, 설치 문서 링크를 주면 agent가 내용을 읽고 적합성을 판단하여
+**이미 존재하는 MCP 서버 또는 관련 설정을 설치·구성·검증·적용**하는 흐름이 목표다.
+필요한 dependency 설치와 기존 서버의 소스 build는 포함한다. 앱이나 API를 분석해 새로운 MCP 서버,
+adapter, tool 구현이나 scaffold를 제작하는 기능은 이 범위에 포함하지 않는다.
+링크 문서와 저장소의 지시문은 참고 자료이며 사용자 요청이나 권한을 대신하지 않는다.
 
 ## 1. 하나의 도구 카탈로그와 실행 계약
 
@@ -33,7 +35,7 @@ Claude Code의 도구 이름은 권한 규칙·subagent 목록·hook matcher에�
 | `WebSearch`, `WebFetch` | 웹 발견과 원문 조회를 분리 | backend, query, URL, credential scope |
 | `ToolSearch` | 연결된 registry에서 관련 도구 발견·schema 로드 | 사용 가능한 서버·도구 목록; 실행 권한은 별도 |
 | MCP tool/resource/prompt | 원래 계약을 보존한 호출·읽기·prompt 선택 | server revision, 계정, URI, 인자별 효과 |
-| `MCPManage`, `MCPAuthor` | 연결 구성과 서버 제작의 typed operation | 현재 ExtensionChangeAuthorization과 결과의 실제 권한 |
+| `MCPManage`, `MCPSetup` | 기존 서버 조사·설치·연결 설정의 typed operation | 현재 ExtensionChangeAuthorization과 결과의 실제 권한 |
 
 호출 순서: `JSON decode → schema 검증 → scope/effect 계산 → hard deny → pre-hook → 변경 인자 재검증 → policy → journal → 실행 → 결과 검증`.
 write lease·post-hook·실행 receipt의 정확한 순서는 아키텍처의 공통 ToolBroker 계약을 따른다.
@@ -91,7 +93,7 @@ fetch는 redirect마다 host·credential scope를 재검사하고 loopback/priva
 
 ## 3. MCP client와 자연어 구성 흐름
 
-MCP는 별도 provider가 아니라 IntegrationService다. Swift engine의 Extensions 모듈이 연결·registry 수명을 소유한다.
+MCP는 별도 provider가 아니라 IntegrationService다. 앱 내부 Swift runtime의 Extensions 모듈이 연결·registry 수명을 소유한다.
 stdio, Streamable HTTP, 호환용 legacy SSE를 지원하고 transport·protocol revision을 명시적으로 협상한다.
 tools/list·call뿐 아니라 pagination, prompts, resources/templates, subscriptions, listChanged, progress, cancellation,
 roots, logging, OAuth, elicitation, sampling의 지원 여부를 negotiated capability별로 관리한다.
@@ -106,93 +108,101 @@ listChanged 후 새 snapshot을 검증해 원자적으로 교체하며 갱신 �
 잘못된 schema의 개별 도구는 이유와 함께 제외한다. MCP annotations는 권한 부여의 근거로 신뢰하지 않는다.
 [MCP tools 계약](https://modelcontextprotocol.io/specification/2026-07-28/server/tools)
 
-사용자의 “이 서비스 MCP를 연결해서 사용해” 요청은 아래 상태 머신으로 처리한다.
+사용자의 “이 GitHub/Markdown/설치 문서를 읽고 MCP를 설치해서 연결해” 요청은 아래 상태 머신으로 처리한다.
 
-1. `discover`: 공식 문서·registry·저장소에서 후보를 찾고 source·maintainer·license·revision을 기록한다.
-2. `select`: 작업에 맞는 tool·transport·런타임·권한 범위를 비교하고 기존 정책 안에서 후보를 선택한다.
-3. `draft`: user/project/project-local scope, endpoint 또는 command/args, 환경 변수 참조, 허용 도구를 만든다.
-4. `credentials`: 기존 Keychain 참조를 범위 내에서 연결한다. 새 OAuth 로그인·없는 secret은 해당 입력만 요청한다.
-5. `test`: 격리된 staging 연결로 handshake·capability·목록·schema·허용된 health/read probe를 확인한다.
-6. `register`: 검증 receipt와 config revision을 저장하고 충돌·scope 우선순위를 검사한다.
-7. `activate`: 연결을 reload하고 schema snapshot을 반영한 뒤 요청한 실제 작업을 수행한다.
-8. `diagnose`: 실패 단계·로그·권한·버전 차이를 보여 주고 범위 내 수정·재검증 또는 이전 revision 복구를 수행한다.
+1. `read`: 제공한 링크의 원문·필요한 참조 문서를 읽고 URL, repository/release revision, 읽은 내용의 digest를 기록한다. 읽지 못한 문서를 추측해 설치하지 않는다.
+2. `assess`: 기존 서버의 목적·도구, transport, macOS/runtime 호환성, 설치 위치, 필요한 의존성과 계정·권한을 판단한다. 문서의 실행 예시를 사용자 지시로 승격하지 않는다.
+3. `draft`: user/project/project-local scope, source/revision, endpoint 또는 command/args, 환경 변수 참조와 설정 diff를 만든다. 설치가 불필요한 원격 연결이나 설정 변경만으로 끝나는 경우도 구분한다.
+4. `install`: 허용한 위치에 고정 revision의 기존 패키지를 설치하거나 기존 저장소를 checkout·build한다. dependency fetch·설치 script·build도 현재 권한 모드와 grant를 통과한다.
+5. `credentials`: 기존 Keychain 참조를 범위 내에서 연결한다. 새 OAuth 로그인·없는 secret은 해당 입력만 요청한다.
+6. `test`: staging 연결로 handshake·capability·목록·schema·허용된 health/read probe를 확인한다. 빌드 성공과 실제 MCP 연결 성공을 구분한다.
+7. `register/activate`: 검증 receipt와 config revision, scope 충돌을 확인한 뒤 원자적으로 등록·reload하고 요청한 실제 작업을 수행한다.
+8. `diagnose`: 실패 단계·로그·권한·버전 차이를 보여 주고 범위 내 설정 수정·재검증 또는 이전 revision 복구를 수행한다.
 
 `test`는 기존 ExtensionChangeAuthorization을 재검사해 시험 run에 한정된 staging 실행 허가를 받는다.
 프로세스 시작/health probe/시험 agent 왕복만 제한적으로 허용하며 일반 세션 registry에는 노출하지 않는다.
 이는 사용자 재승인이나 영속 활성화가 아니다. 시험 완료·실패·취소 시 임시 process/연결/registry를 회수하고,
 검증된 revision만 `register/activate`에서 영속 사용 대상으로 승격한다.
 
-`MCPManage`의 operation은 discover/inspect/draft/validate/test/register/reload/status/diagnose/disable/rollback이다.
+`MCPManage`의 operation은 inspect/status/reload/diagnose/disable/rollback이고, `MCPSetup`은 read/assess/draft/install/build/validate/test/register/activate를 묶는다.
 각 operation은 typed input과 receipt를 가지며 관리 도구라는 이유로 임의 shell 실행 권한을 얻지 않는다.
 복합 operation은 전체 workspace write lease를 점유하지 않는 orchestration 호출이다. parent intent/grant를
-기록한 뒤 실제 source·build·설치·등록 leaf를 같은 broker로 보내고 leaf별 필요한 lease를 얻는다.
+기록한 뒤 실제 문서 읽기·설정 변경·dependency 설치·기존 서버 build·등록 leaf를 같은 broker로 보내고 leaf별 필요한 lease를 얻는다.
 parent가 lease를 잡고 child 완료를 기다리는 재진입 교착을 금지한다. child에서도 현재 policy/grant를 재검사한다.
 프로젝트 파일은 `.lathe/mcp.json`, 개인 override는 `.lathe/settings.local.json`, secret은 Keychain에 둔다.
 `.mcp.json` 읽기와 scope 우선순위는 [확장 계약](extensions.md)을 재사용하며, imported 원본을 자동 덮어쓰지 않는다.
 실행 경로에는 절대 경로와 고정된 패키지 revision을 기록한다. 검증된 서버를 다음 실행에서 `latest`로 바꾸지 않는다.
 
-## 4. “스스로”의 권한 계약
+## 4. 설치 위임과 권한
 
-사용자의 제작·연결 요청이나 기존 정책이 허용한 범위에서는 create → build → test → register → activate를 자동 진행한다.
-파일 생성·각 테스트·각 reload마다 같은 승인을 반복하지 않는다. 준비만 끝내고 사용자가 명령을 복사하게 하는 것을 기본 흐름으로 삼지 않는다.
-PolicyEngine은 사용자 출처의 요청과 기존 정책에서 `ApprovalGrant`의 scoped subtype인
-`ExtensionChangeAuthorization`을 발급하고 모델에는 불투명한 참조만 준다.
-grant에는 목적, workspace, 허용 operation, source/dependency 범위, 파일/네트워크/계정 효과, credential 참조, 예산·만료를 묶는다.
-agent가 만든 source revision과 build artifact digest는 해당 grant의 허용된 제작 과정에 연결해 검증한다.
-새 digest라는 이유만으로 매 build마다 다시 묻지 않으며, 허용 범위를 벗어난 효과나 출처 변경은 delta로 판정한다.
+사용자가 지정한 링크와 설치 요청에서 목적·대상 서버·설정 scope를 정하고 선택한 권한 모드를 적용한다.
+`fullAccess`는 그 범위 안의 도구를 추가 승인 없이 실행하고, `autoApprove`는 낮은 위험으로 분류된
+도구만 자동 실행하며 나머지는 승인한다. `acceptEdits`는 읽기·파일 편집을 자동 실행하되 설치·build·서버
+시작 같은 실행은 승인한다. `requestApproval`은 읽기·쓰기·실행 모두 실행 전에 승인한다.
+승인되어 있는 정확한 호출이나 유효한 위임을 같은 경계에서 중복 확인하지 않되, “설치해”라는 요청을
+선택한 권한 모드의 승인 절차를 무시하는 근거로 사용하지 않는다. 상세 모드는 [권한 계약](features.md)을 따른다.
 
-새 secret·추가 계정·작업 범위 밖 경로·새로운 외부 쓰기·설치/실행 권한 확대에만 필요한 입력 또는 범위 확대를 요청한다.
-명시적 deny, provider 제한, sandbox 제한을 모델 판단으로 해제할 수 없다. grant는 모델·hook·MCP 출력이 발급하거나 수정할 수 없다.
-서버가 요구하는 명시적 인간 동의 절차도 자동 성공으로 위조하지 않는다.
-낯선 repository의 실행 설정을 발견했다는 사실은 제작·활성화 위임이 아니며, 기존 passive parse/trust 단계가 그대로 적용된다.
-승인 근거·적용 scope·활성 revision을 GUI와 CLI에서 조회·철회할 수 있고 철회 후 새 호출은 차단한다.
-grant 만료·철회는 진행 중 제작에도 적용한다. Plan 전환 시 설정 쓰기·build/설치·활성화와 mutation MCP를
-중지·대기시키고 공통 실행 barrier가 완료된 뒤 읽기 전용 계획만 계속한다. 기존 grant가 Plan을 우회하지 않는다.
+PolicyEngine은 사용자 출처 요청과 실제 승인 기록에서 `ApprovalGrant`의 scoped subtype인
+`ExtensionChangeAuthorization`을 만들고 모델에는 불투명한 참조만 준다.
+grant에는 목적, workspace, 허용 operation, 서버 source/revision·dependency 범위,
+파일·네트워크·계정 효과, credential 참조, 예산·만료를 묶는다. 설치 artifact digest와 설정 revision을
+해당 위임에 연결한다. 같은 서버의 허용된 build 산출물이 달라졌다는 이유만으로 위임을 새로 발급하지 않는다.
+다른 서버·출처·범위 밖 경로·새 외부 쓰기·권한 확대는 기존 위임 안의 변경으로 가장할 수 없다.
 
-## 5. MCP 서버 제작 파이프라인
+문서의 `curl`, package manager, env 설정이나 MCP의 readOnly annotation은 실행 권한의 증거가 아니다.
+프로젝트 파일·검색 결과·설치 문서·hook·MCP 출력은 grant나 현재 모드, deny/trust를 발급·수정하지 못한다.
+낯선 repository에서 설정을 발견하는 것과 사용자가 그 서버를 설치하라고 요청하는 것은 구분한다.
+인증이 없거나 새 계정·OAuth의 인간 동의가 필요하면 필요한 입력에서 기다리며 성공을 위조하지 않는다.
+`fullAccess`도 OS 권한·자격 증명을 새로 만들거나 사용자가 지정한 목적 밖의 설치를 허용한다는 뜻은 아니다.
 
-`MCPAuthor`는 spec/scaffold/build/test/package/register/repair operation을 제공한다.
-사용자가 “이 API를 쓰는 MCP 서버를 만들어 붙여줘”라고 하면 입출력·인증·대상 데이터·읽기/쓰기 효과를 먼저 구체화한다.
-기본 SDK는 Swift이며, 연동 대상 생태계와 설치된 런타임에 따라 Python/TypeScript 등 검증된 SDK template도 선택할 수 있다.
-생성 서버의 언어는 Swift 앱·engine의 구현 언어와 독립적이고 Node/Python을 engine의 필수 wrapper로 만들지 않는다.
-공식 서버 가이드의 tools/resources/prompts 구조를 사용하되 예제의 외부 서비스·secret을 그대로 실행 환경에 복사하지 않는다.
-stdio 서버 stdout은 protocol 전용이며 로그는 stderr 또는 파일에 쓴다. [공식 서버 제작 가이드](https://modelcontextprotocol.io/docs/develop/build-server)
+승인 근거·적용 scope·활성 revision을 앱과 개발 client에서 조회·철회한다. 만료·철회 뒤에는 새 호출을
+막고 진행 중 설치·build·시험 process를 취소 정책에 따라 정리한다. 계획 작업은 권한 모드와 별개다.
+사용자가 계획만 요청한 동안에는 실제 설치·설정 쓰기·활성화를 실행하지 않는다. 계획 검토를 마쳤어도
+후속 구현에는 선택한 권한 모드와 현재 grant가 그대로 적용된다.
 
-산출물은 지정한 프로젝트의 `integrations/mcp/<server>/` 아래에 생성한다.
+## 5. 기존 서버 설치·검증·적용 파이프라인
 
-- tool/resource/prompt 계약, 입력 검증, 실제 adapter와 mock adapter를 분리한 source.
-- compiler/runtime 요구사항, 고정 SDK/dependency와 lockfile, build/test 명령, license/source 정보.
-- unit/protocol/integration fixture, secret 없는 example config, 사용법·권한·한계 README.
-- package manifest, artifact digest, config candidate, 테스트 receipt와 실패 시 진단 자료.
+`MCPSetupService`는 사용자 링크에서 확인한 기존 배포물이나 저장소 revision을 도입한다.
+공식 설치법이 package manager 설치, release 다운로드, 기존 source build, 원격 URL 등록 중 무엇을
+요구하는지 판단한다. 설치 문서가 없거나 호환되지 않으면 근거와 미완료 상태를 남긴다.
+부족한 기능을 채우기 위해 새 MCP 서버나 adapter를 생성하여 원래 서버 설치를 완료했다고 표시하지 않는다.
 
-package install·dependency fetch·build script 실행도 ToolBroker와 grant의 source/network/process 범위에 포함한다.
-생성 source를 임의로 신뢰하지 않으며 검증된 ExecutionEnvironment에서 build·test한다.
-OS 격리가 검증되지 않은 환경은 “sandbox 완료”로 표시하지 않는다. 요구된 격리를 제공하지 못하면 활성화 게이트를 통과하지 못한다.
-초기 테스트에는 mock API·임시 workspace·테스트 credential만 사용하며 운영 시스템 쓰기·결제·메시지 전송을 검증 수단으로 삼지 않는다.
+설치·검증 기록에는 다음을 남긴다.
+
+- 읽은 GitHub/Markdown/설치 문서 URL과 revision/digest, 선택한 서버와 선택 이유.
+- 기존 package/source revision, runtime 요구사항, dependency lock, 실제 설치·build 명령과 receipt.
+- 설치 경로와 소유 범위, artifact digest, command/args 또는 endpoint, secret 없는 설정 diff.
+- handshake·목록·호출 결과, 실패 진단, 활성화한 config revision과 이전 정상 revision.
+
+runtime과 dependency는 기존 서버의 요구사항에 맞춰 선택한다. Swift 앱이 Node/Python 서버를
+연결할 수 있다는 뜻이지 앱 코어를 그 런타임의 wrapper로 바꾸거나 새 서버 source를 만든다는 뜻은 아니다.
+설치 script·dependency fetch·기존 build/test도 같은 ToolBroker와 현재 모드를 따른다.
+OS 격리가 검증되지 않았으면 sandbox 완료라고 표시하지 않으며, 요구한 격리를 제공할 수 없으면
+해당 설치 또는 활성화를 완료로 처리하지 않는다. 검증은 허용한 fixture·health/read 작업을 우선하며,
+운영 시스템 쓰기·결제·메시지 전송은 설치 검증이라는 이유로 추가 실행하지 않는다.
 
 | 검증 단계 | 통과 조건 |
 | --- | --- |
-| Unit | 입력/출력 schema, pagination, 오류 변환, 인증 누락, timeout, 민감 정보 redaction |
-| Protocol | initialize/version/capability, tools/resources/prompts 목록·호출, malformed frame·stdio 오염·종료 |
-| Client integration | Lathe client와 실제 transport 왕복, schema 갱신·scope·credential·progress·cancel |
-| Agent roundtrip | 실제 선택 모델이 schema를 보고 호출 → 생성한 실제 서버가 mock downstream API를 호출 → 모델의 결과 활용까지 완료 |
-| Effect isolation | mock 외 endpoint 차단, workspace 밖 쓰기 차단, 취소 후 child/process 정리 확인 |
+| 설치·환경 | 고정 revision과 runtime/dependency 확인, 실행 파일 존재, 필요한 경우 기존 서버 build 성공 |
+| 설정 | command/args/cwd 또는 URL, scope 우선순위, credential 참조, secret 노출 없음 |
+| Protocol | initialize/version/capability, tools/resources/prompts 목록, schema, malformed frame·stdio 오염·종료 진단 |
+| Client integration | 실제 transport 왕복, 허용한 tool 호출, auth·progress·timeout·cancel·연결 오류 |
+| Agent roundtrip | 선택한 모델이 schema를 보고 기존 서버의 허용 도구를 호출하고 결과를 활용 |
+| 수명·효과 | 정해진 scope 안의 검증, 취소 후 소유 process 정리, 외부 부수효과와 복구 한계 기록 |
 
-실제 모델 연결이 없으면 Agent roundtrip은 미검증으로 남긴다. fake model 테스트를 실제 provider 검증으로 표시하지 않는다.
-MCP Inspector는 추가 진단·CI 검증 도구로 사용할 수 있으나 앱의 필수 런타임은 아니다.
+실제 모델 연결이 없으면 Agent roundtrip은 미검증으로 남긴다. fixture 모델 검사를 실제 provider
+검증으로 표시하지 않는다. MCP Inspector는 선택적 진단 도구이며 앱의 필수 런타임은 아니다.
 [공식 Inspector 가이드](https://modelcontextprotocol.io/docs/tools/inspector)
 
-통과한 artifact를 app 관리 installation에 revision별로 설치하고, 검증된 digest와 launch config를 원자적으로 등록한다.
-새 revision을 준비하는 동안 기존 호출은 기존 revision에 고정한다. 전환 시 신규 호출을 잠시 큐에 두고
-기존 호출을 정해진 시간 안에 drain한 후 새 revision을 활성화한다. drain 실패 시 전환을 보류하고 기존 연결을 유지한다.
-효과를 확인하지 못한 호출을 강제 재실행해 전환을 완료하지 않는다.
-schema·권한이 확대되면 해당 차이를 policy가 재평가하며, 승인된 제작 범위의 일반 수정은 자동 활성화한다.
-build/test/health 실패 시 기존 설치를 유지한다. rollback은 이전 artifact·config·schema snapshot을 복구한다.
-rollback은 이미 발생한 외부 부수효과를 되돌린다는 의미가 아니며, write 호출 재시도는 idempotency 계약이 있을 때만 허용한다.
+검증된 artifact/config digest를 revision별로 등록한다. 새 revision 준비 중 기존 호출은 기존 revision에
+고정하고, 신규 호출을 잠시 큐에 둔 뒤 기존 호출을 drain한다. 실패하면 전환을 보류하고 이전 정상
+서버/설정을 유지한다. schema나 효과·범위가 바뀌면 현재 모드와 grant를 다시 평가한다.
+rollback은 이전 설치·설정·schema를 복구하며 이미 발생한 원격 효과를 되돌렸다는 뜻은 아니다.
+효과를 확인하지 못한 호출을 자동 재실행해 설치·업데이트를 완료하지 않는다.
 
 ## 6. Lathe 자체의 MCP server 모드
 
-MCP client와 새 서버 제작 외에 `lathe mcp serve` 상당의 stdio server를 제공한다(`LAT-MCP-010`).
+기존 서버를 연결하는 MCP client와 별도로 `lathe mcp serve` 상당의 stdio server를 제공한다(`LAT-MCP-010`).
 외부 client가 선택된 파일·검색·편집·명령 도구를 사용할 때 같은 engine·ToolBroker·journal을 이용한다.
 기본은 로컬 stdio이며 HTTP 공개 hosting은 별도 기능이다. 외부 client 요청은 인간 승인으로 취급하지 않는다.
 launch profile에 workspace roots·tool subset·grant·budget·연결 수명을 고정하고 이 범위 안에서만 호출을 받는다.
@@ -201,10 +211,10 @@ engine은 승인된 launch profile을 검증해 ingress instance ID와 한 번�
 MCP clientInfo·요청에 적힌 client 이름/grant ID는 표시용 외부 입력이며 인증 근거가 아니다.
 재연결은 새 ingress를 발급하고 현재 launch profile/grant를 재검사한다. 다른 bridge의 grant를 가져올 수 없다.
 호출 receipt는 ingress instance와 MCP request ID를 함께 기록한다. 동일 clientInfo를 보낸 두 client도 각자 범위만 사용한다.
-GUI/승인 client가 없을 때 필요한 승인은 구조화된 tool error로 반환하고 무한 대기나 bypass로 바꾸지 않는다.
+GUI/승인 client가 없을 때 필요한 승인은 구조화된 tool error로 반환하고 무한 대기나 fullAccess로 바꾸지 않는다.
 stdout은 MCP protocol 전용, 진단은 stderr다. 연결 종료 시 소유 작업의 취소/유지 정책을 명시하고 receipt를 조회할 수 있게 한다.
 자기 server를 다시 client registry에 붙여 재귀 호출하는 경로는 instance identity·invocation stack·depth 제한으로 차단한다.
-서버 수명은 engine 소유로 두어 GUI가 닫혀도 stdio client 연결 동안 동작할 수 있다.
+서버 수명은 앱 내부 runtime이 소유한다. 창을 닫을 때 사용자가 앱의 백그라운드 유지를 선택한 경우에만 계속되며, 앱 종료 뒤 독립 서버나 daemon을 남기지 않는다.
 Claude Code도 MCP server 모드를 제공한다. Lathe가 공통 broker 권한을 유지하는 차이는 N으로 기록한다.
 [공식 MCP server 모드](https://code.claude.com/docs/en/mcp#use-claude-code-as-an-mcp-server)
 
@@ -220,13 +230,13 @@ Claude Code도 MCP server 모드를 제공한다. Lathe가 공통 broker 권한�
 | T1 카탈로그·코드 검색 | 이름 충돌·schema 오류·hook 수정 후 재검증·외부 경로 차단 fixture |
 | T2 모델 독립 웹 검색 | 외부 API와 self-hosted backend 각각 검색→조회→실제 출처 인용; 오류·한도·취소 |
 | T3 MCP 사용·자동 구성 | LAT-MCP-001~004/007, E2E-20: stdio/HTTP 연결→scope/credential→목록→실제 호출→reload/diagnose/rollback |
-| T4 MCP 제작·활성화 | LAT-MCP-005~007, E2E-21: 자연어 요청→source/lock→mock 검증→package→등록→실제 agent 왕복 |
-| T5 자율성·권한 회귀 | LAT-MCP-008, E2E-20/21: 위임 범위 내 반복 승인 없음, 권한 확대만 질문, 주입된 config/설명으로 self-approve 불가 |
+| T4 문서 기반 설치·적용 | LAT-MCP-005~007, E2E-21: 사용자 링크 읽기→기존 package/revision·의존성 설치 또는 build→설정 diff→실제 MCP 검증→적용 |
+| T5 모드·위임 회귀 | LAT-MCP-008, E2E-20/21: 네 모드의 승인 범위, 정확한 승인 재사용, grant 철회, 문서/config/설명으로 self-approve 불가 |
 | T6 비텍스트 결과·server 모드 | LAT-MCP-009/010, E2E-27: screenshot→vision→재사용, 미지원 artifact 보존, 외부 client→공통 broker→무인 승인 오류·재귀 차단 |
 
 T1과 T2의 독립 웹 검색·WebFetch 기본 기능은 M1 완료 게이트에 포함한다. T2의 시나리오는 E2E-19와 연결한다.
-T3·T4·T5는 X9를 포함한 M4 확장 완료 게이트이며 E2E-20 자동 설정과 E2E-21 자체 제작을 모두 통과해야 한다.
+T3·T4·T5는 X9를 포함한 M4 확장 완료 게이트이며 E2E-20 자동 설정과 E2E-21 문서 기반 기존 서버 설치을 모두 통과해야 한다.
 T6는 M3 provider content 계약 위에 M4에서 완성한다.
 고급 browser 조작·UI와 원격 서비스는 M6/M7 범위로 유지하되 기본 검색·본문 조회의 선행 조건으로 만들지 않는다.
-최종 시나리오는 로컬 모델로 자료를 검색하고, 필요한 mock MCP 서버를 제작·활성화해 도구를 호출한 뒤 검증된 출처와 결과를 보고하는 것이다.
+최종 시나리오는 로컬 모델이 사용자가 제공한 설치 문서를 읽고, 기존 fixture MCP 서버를 설치·설정·검증·적용해 도구를 호출한 뒤 출처와 결과를 보고하는 것이다.
 build 실패·취소·재시작·schema 변경·없는 credential에서도 성공을 꾸미지 않고 다음 가능한 작업과 미완료 원인을 정확히 남겨야 한다.

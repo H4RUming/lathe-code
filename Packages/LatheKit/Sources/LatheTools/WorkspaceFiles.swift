@@ -56,6 +56,21 @@ final class WorkspaceFiles {
         return FileIdentity(info)
     }
 
+    /// lstat-style validation does not open or read the target file. Approval
+    /// preparation may inspect path/type/permissions, but never the body or SHA.
+    func inspectFile(_ path: String, allowMissing: Bool = false) throws -> (isExecutable: Bool, exists: Bool) {
+        let (parent, name) = try parentDirectory(path); defer { close(parent) }
+        var info = stat()
+        guard fstatat(parent, name, &info, AT_SYMLINK_NOFOLLOW) == 0 else {
+            if errno == ENOENT, allowMissing { return (false, false) }
+            throw ToolError.io("inspect file without reading", errno)
+        }
+        guard info.st_mode & S_IFMT == S_IFREG, info.st_nlink == 1 else {
+            throw ToolError.denied("Only regular files with one hard link can be read or replaced.")
+        }
+        return (info.st_mode & 0o111 != 0, true)
+    }
+
     func read(_ path: String) throws -> Data {
         let (parent, name) = try parentDirectory(path); defer { close(parent) }
         return try read(parent: parent, name: name)

@@ -49,8 +49,8 @@ extension EngineRuntime {
         guard run.state == .running, workers[run.id] != nil else { throw LatheError.conflict("종료되거나 복구된 실행에는 승인할 수 없습니다.") }
         if approved && [.approved, .executing, .completed].contains(item.state) { return item }
         if !approved && item.state == .denied { return item }
-        guard item.state == .pendingApproval, run.configuration?.permissionMode == .manual ||
-                (run.configuration?.permissionMode == .acceptEdits && item.effect == .shell) else {
+        guard item.state == .pendingApproval, let mode = run.configuration?.permissionMode,
+              mode == .requestApproval || mode == .autoApprove || (mode == .acceptEdits && item.effect == .shell) else {
             throw LatheError.conflict("현재 권한 모드에서 승인 대기 중인 도구가 아닙니다.")
         }
         item.state = approved ? .approved : .denied
@@ -165,8 +165,6 @@ extension EngineRuntime {
         case .allow: item.state = .approved
         case .ask: break
         }
-        // Keep the baseline reference separately from the eventual output receipt.
-        if let before = prepared.beforeContent { item.beforeBlobID = try blobs.put(before) }
         try store.saveInvocation(item)
         if item.state == .pendingApproval {
             let deadline = ContinuousClock.now + .seconds(configuration.approvalTimeoutSeconds)
@@ -196,6 +194,12 @@ extension EngineRuntime {
         item.state = .executing
         try store.saveInvocation(item)
         do {
+            // Reading an existing write target is itself authorized work. Never
+            // capture or persist its body while its invocation awaits approval.
+            if let before = try ToolBroker.captureBeforeContent(prepared) {
+                item.beforeBlobID = try blobs.put(before)
+                try store.saveInvocation(item)
+            }
             // The helper parent is private and owned by this data root.
             let executions = dataDirectory.appendingPathComponent("executions", isDirectory: true)
             try FileManager.default.createDirectory(at: executions, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])

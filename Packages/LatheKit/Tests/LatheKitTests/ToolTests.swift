@@ -29,34 +29,115 @@ struct ToolTests {
     @Test func createsReadsAndReplacesFilesWithExactSHA() async throws {
         let fixture = try ToolFixture(); defer { fixture.cleanup() }
         let create = try fixture.prepare("write_file", ["path": "hello.txt", "content": "before 🌱\n", "expectedSHA256": "missing"])
-        #expect(create.beforeContent == nil)
-        #expect(PolicyEngine.decision(create, mode: .manual) == .ask)
+        #expect(try ToolBroker.captureBeforeContent(create) == nil)
+        #expect(PolicyEngine.decision(create, mode: .requestApproval) == .ask)
         _ = try await fixture.execute(create)
         let read = try await fixture.execute(fixture.prepare("read_file", ["path": "hello.txt"]))
         let object = try #require(try JSONSerialization.jsonObject(with: Data(read.output.utf8)) as? [String: Any])
         let digest = try #require(object["sha256"] as? String)
         #expect(object["content"] as? String == "before 🌱\n")
         let update = try fixture.prepare("write_file", ["path": "hello.txt", "content": "after\n", "expectedSHA256": digest])
-        #expect(update.beforeContent == Data("before 🌱\n".utf8))
+        #expect(try ToolBroker.captureBeforeContent(update) == Data("before 🌱\n".utf8))
         _ = try await fixture.execute(update)
         #expect(try String(contentsOf: fixture.workspace.appendingPathComponent("hello.txt"), encoding: .utf8) == "after\n")
         await #expect(throws: (any Error).self) { try await fixture.execute(update) }
     }
 
-    @Test func permissionsNeverGrantShellThroughAcceptEditsOrPlan() throws {
+    @Test func fourPermissionModesDistinguishEveryEffectAndKeepCommandAllowlistExact() throws {
         let fixture = try ToolFixture(); defer { fixture.cleanup() }
-        let write = try fixture.prepare("write_file", ["path": "new", "content": "x", "expectedSHA256": "missing"])
+        let write = try fixture.prepare("write_file", ["path": "new.swift", "content": "x", "expectedSHA256": "missing"])
         let command = try fixture.prepare("run_command", ["executable": "/bin/echo", "arguments": ["hello"], "workingDirectory": ".", "timeoutSeconds": 5])
         let read = try fixture.prepare("list_directory", ["path": "."])
-        #expect(PolicyEngine.decision(write, mode: .acceptEdits) == .allow)
-        #expect(PolicyEngine.decision(command, mode: .acceptEdits) == .ask)
-        #expect(PolicyEngine.decision(command, mode: .manual) == .ask)
-        for mode in [PermissionMode.plan, .dontAsk] {
-            if case .deny = PolicyEngine.decision(write, mode: mode) {} else { Issue.record("Unexpected write grant") }
-            if case .deny = PolicyEngine.decision(command, mode: mode) {} else { Issue.record("Unexpected shell grant") }
-            #expect(PolicyEngine.decision(read, mode: mode) == .allow)
+        let pwd = try fixture.prepare("run_command", ["executable": "/bin/pwd", "arguments": [], "workingDirectory": ".", "timeoutSeconds": 5])
+        for prepared in [read, write, command, pwd] {
+            #expect(PolicyEngine.decision(prepared, mode: .fullAccess) == .allow)
+            #expect(PolicyEngine.decision(prepared, mode: .requestApproval) == .ask)
+            #expect(PolicyEngine.decision(prepared, mode: .acceptEdits) == (prepared.effect == .shell ? .ask : .allow))
+            #expect(PolicyEngine.decision(prepared, mode: .autoApprove) == (prepared.name == "run_command" && prepared.requestHash != pwd.requestHash ? .ask : .allow))
+        }
+        for (executable, arguments) in [
+            ("/bin/pwd", ["-P"]), ("/bin/pwd", [""]), ("/bin/../bin/pwd", []),
+            ("/usr/bin/pwd", []), ("/usr/bin/env", ["pwd"]), ("/bin/sh", ["-c", "pwd"]),
+            (fixture.workspace.appendingPathComponent("pwd").path, []),
+            ("/usr/bin/git", ["status"]), ("/usr/bin/swift", ["test"]), ("/usr/bin/curl", ["https://example.invalid"]),
+        ] {
+            let disguised = try fixture.prepare("run_command", ["executable": executable, "arguments": arguments, "workingDirectory": ".", "timeoutSeconds": 5])
+            #expect(PolicyEngine.decision(disguised, mode: .autoApprove) == .ask)
         }
         #expect(command.summary.contains("UNSANDBOXED"))
+    }
+
+    @Test func autoApprovalSeparatesOrdinaryFilesFromSensitiveConfigurationAndExecutablePaths() throws {
+        let fixture = try ToolFixture(); defer { fixture.cleanup() }
+        for path in ["Sources/Editor.swift", "src/main.py", "docs/guide.md", "README.md", "notes.txt"] {
+            let url = fixture.workspace.appendingPathComponent(path)
+            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try Data("fixture".utf8).write(to: url)
+            for tool in ["read_file", "write_file"] {
+                var arguments: [String: Any] = ["path": path]
+                if tool == "write_file" { arguments["content"] = "new"; arguments["expectedSHA256"] = String(repeating: "0", count: 64) }
+                #expect(PolicyEngine.decision(try fixture.prepare(tool, arguments), mode: .autoApprove) == .allow)
+            }
+        }
+        for path in [".env", ".github/workflows/ci.yml", "Sources/config/Client.swift", "Sources/private_key.txt", "credentials.json",
+                     "Package.swift", "AGENTS.md", "docs/SKILL.md", "Scripts/task.py", "src/task.sh", "unknown/readme.md", "data.json",
+                     "setup.py", "install.py", "build.py", "src/vite.config.ts", "src/id_rsa.txt",
+                     "build.rs", "sitecustomize.py", "usercustomize.py", "Package@swift-6.0.swift", "src/APIKey.swift", "userSecrets.txt", "PrivateKey.swift"] {
+            let url = fixture.workspace.appendingPathComponent(path)
+            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try Data("fixture".utf8).write(to: url)
+            for tool in ["read_file", "write_file"] {
+                var arguments: [String: Any] = ["path": path]
+                if tool == "write_file" { arguments["content"] = "new"; arguments["expectedSHA256"] = String(repeating: "0", count: 64) }
+                let prepared = try fixture.prepare(tool, arguments)
+                #expect(PolicyEngine.decision(prepared, mode: .autoApprove) == .ask)
+                #expect(PolicyEngine.decision(prepared, mode: .acceptEdits) == .allow)
+            }
+        }
+        let executable = fixture.workspace.appendingPathComponent("src/main.py")
+        #expect(chmod(executable.path, 0o700) == 0)
+        #expect(PolicyEngine.decision(try fixture.prepare("read_file", ["path": "src/main.py"]), mode: .autoApprove) == .ask)
+        for path in [".github", "Scripts", "unknown", "Sources/config"] {
+            #expect(PolicyEngine.decision(try fixture.prepare("list_directory", ["path": path]), mode: .autoApprove) == .ask)
+        }
+        #expect(PolicyEngine.decision(try fixture.prepare("list_directory", ["path": "docs"]), mode: .autoApprove) == .allow)
+    }
+
+    @Test func preparingReadsAndWritesDoesNotRequireReadingFileBodiesOrCheckingContentSHA() async throws {
+        let fixture = try ToolFixture(); defer { fixture.cleanup() }
+        let url = fixture.workspace.appendingPathComponent("private.txt")
+        try Data("private fixture body".utf8).write(to: url)
+        #expect(chmod(url.path, 0o000) == 0)
+        defer { _ = chmod(url.path, 0o600) }
+        let read = try fixture.prepare("read_file", ["path": "private.txt"])
+        let write = try fixture.prepare("write_file", ["path": "private.txt", "content": "replacement", "expectedSHA256": String(repeating: "0", count: 64)])
+        #expect(PolicyEngine.decision(read, mode: .requestApproval) == .ask)
+        #expect(PolicyEngine.decision(write, mode: .requestApproval) == .ask)
+        await #expect(throws: (any Error).self) { try await fixture.execute(read) }
+        #expect(throws: (any Error).self) { try ToolBroker.captureBeforeContent(write) }
+        #expect(chmod(url.path, 0o600) == 0)
+        // A wrong SHA is checked only after authorization, never during preparation.
+        #expect(throws: (any Error).self) { try ToolBroker.captureBeforeContent(write) }
+        #expect(try String(contentsOf: url, encoding: .utf8) == "private fixture body")
+    }
+
+    @Test func permissionSnapshotsDecodeLegacyModesConservativelyAndOnlyEncodeFourNewModes() throws {
+        #expect(PermissionMode.allCases == [.fullAccess, .autoApprove, .acceptEdits, .requestApproval])
+        #expect(RunConfiguration().permissionMode == .requestApproval)
+        for mode in ["manual", "plan", "dontAsk"] {
+            let data = Data("{\"permissionMode\":\"\(mode)\",\"maxSteps\":12,\"approvalTimeoutSeconds\":300}".utf8)
+            let configuration = try JSONDecoder().decode(RunConfiguration.self, from: data)
+            #expect(configuration.permissionMode == .requestApproval)
+            let encoded = String(decoding: try JSONEncoder().encode(configuration), as: UTF8.self)
+            #expect(encoded.contains("requestApproval"))
+            #expect(!encoded.contains(mode))
+            #expect(PermissionMode(rawValue: mode) == nil)
+        }
+        for mode in PermissionMode.allCases {
+            let bytes = try JSONEncoder().encode(mode)
+            #expect(try JSONDecoder().decode(PermissionMode.self, from: bytes) == mode)
+        }
+        #expect(throws: (any Error).self) { try JSONDecoder().decode(PermissionMode.self, from: Data("\"unknown\"".utf8)) }
     }
 
     @Test func traversalSymlinksGitAndProtectedStateAreBlocked() async throws {

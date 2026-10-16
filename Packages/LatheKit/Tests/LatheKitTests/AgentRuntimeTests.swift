@@ -45,6 +45,25 @@ private actor WriteCallTransport: HTTPStreamingTransport {
     }
 }
 
+private actor SingleToolTransport: HTTPStreamingTransport {
+    let call: ModelToolCall
+    private(set) var requests: [URLRequest] = []
+    init(name: String, arguments: String) { call = ModelToolCall(id: "permission-call", name: name, arguments: arguments) }
+    func stream(request: URLRequest, onBytes: @escaping @Sendable (Data) async throws -> Bool) async throws {
+        requests.append(request)
+        let frame: String
+        if requests.count == 1 {
+            let object: [String: Any] = ["choices": [["index": 0, "delta": ["tool_calls": [["index": 0,
+                "id": call.id, "type": "function", "function": ["name": call.name, "arguments": call.arguments]]]],
+                "finish_reason": "tool_calls"]]]
+            frame = String(decoding: try JSONSerialization.data(withJSONObject: object), as: UTF8.self)
+        } else {
+            frame = #"{"choices":[{"index":0,"delta":{"content":"fixture complete"},"finish_reason":"stop"}]}"#
+        }
+        _ = try await onBytes(Data(("data: " + frame + "\n\ndata: [DONE]\n\n").utf8))
+    }
+}
+
 private struct AgentFixture {
     let root = FileManager.default.temporaryDirectory.appendingPathComponent("lathe-agent-runtime-\(UUID().uuidString)")
     var database: URL { root.appendingPathComponent("state/lathe.sqlite") }
@@ -69,7 +88,112 @@ private func complete(_ runtime: EngineRuntime, sessionID: UUID, runID: UUID) as
     throw LatheError.transport("fixture completion timeout")
 }
 
+private func pendingInvocation(_ runtime: EngineRuntime, runID: UUID) async throws -> ToolInvocationSnapshot {
+    let deadline = ContinuousClock.now + .seconds(4)
+    while ContinuousClock.now < deadline {
+        if let item = try await runtime.invocations(runID: runID).first(where: { $0.state == .pendingApproval }) { return item }
+        try await Task.sleep(for: .milliseconds(5))
+    }
+    throw LatheError.transport("fixture approval timeout")
+}
+
 struct AgentRuntimeTests {
+    @Test func requestApprovalReadsOnlyAfterExactApprovalAndCancellationInvalidatesConsent() async throws {
+        let fixture = try AgentFixture(); defer { fixture.cleanup() }
+        let file = fixture.workspace.appendingPathComponent("file.txt")
+        try Data("before approval".utf8).write(to: file)
+        let transport = SingleToolTransport(name: "read_file", arguments: #"{"path":"file.txt"}"#)
+        let runtime = try EngineRuntime(databaseURL: fixture.database, credentials: MemoryCredentialStore(), modelClient: ModelClient(transport: transport))
+        let profile = ProviderProfile(name: "fixture", api: .openAIChat, baseURL: "https://fixture.invalid/v1", model: "fixture")
+        _ = try await runtime.saveProviderProfile(profile, apiKey: nil, clearCredential: false)
+        let session = try await runtime.createSession(title: "read approval", workspacePath: fixture.workspace.path)
+        let run = try await runtime.submit(sessionID: session.id, prompt: "read", requestID: UUID(), configuration: .init(profile: profile, permissionMode: .requestApproval))
+        let pending = try await pendingInvocation(runtime, runID: run.id)
+        #expect(pending.effect == .read && pending.output == nil && pending.blobID == nil && pending.beforeBlobID == nil)
+        #expect(await transport.requests.count == 1)
+        await #expect(throws: LatheError.self) {
+            try await runtime.decideApproval(invocationID: pending.id, requestHash: String(repeating: "0", count: 64), approved: true)
+        }
+        #expect(try await runtime.invocation(id: pending.id).state == .pendingApproval)
+        try Data("after approval boundary".utf8).write(to: file)
+        _ = try await runtime.decideApproval(invocationID: pending.id, requestHash: pending.requestHash, approved: true)
+        #expect(try await complete(runtime, sessionID: session.id, runID: run.id).state == .completed)
+        let finished = try await runtime.invocation(id: pending.id)
+        #expect(finished.state == .completed)
+        #expect(finished.output?.contains("after approval boundary") == true)
+        #expect(finished.output?.contains("before approval") == false)
+        #expect(await transport.requests.count == 2)
+
+        let cancelTransport = SingleToolTransport(name: "list_directory", arguments: #"{"path":"."}"#)
+        let cancelRuntime = try EngineRuntime(databaseURL: fixture.root.appendingPathComponent("cancel/lathe.sqlite"), credentials: MemoryCredentialStore(), modelClient: ModelClient(transport: cancelTransport))
+        _ = try await cancelRuntime.saveProviderProfile(profile, apiKey: nil, clearCredential: false)
+        let cancelSession = try await cancelRuntime.createSession(title: "cancel read", workspacePath: fixture.workspace.path)
+        let cancelRun = try await cancelRuntime.submit(sessionID: cancelSession.id, prompt: "list", requestID: UUID(), configuration: .init(profile: profile))
+        let cancelled = try await pendingInvocation(cancelRuntime, runID: cancelRun.id)
+        _ = try await cancelRuntime.cancel(runID: cancelRun.id)
+        #expect(try await cancelRuntime.invocation(id: cancelled.id).state == .cancelled)
+        await #expect(throws: LatheError.self) {
+            try await cancelRuntime.decideApproval(invocationID: cancelled.id, requestHash: cancelled.requestHash, approved: true)
+        }
+        #expect(await cancelTransport.requests.count == 1)
+    }
+
+    @Test(arguments: [PermissionMode.requestApproval, .autoApprove])
+    func deniedSensitiveReadNeverPublishesContentToStorageOrProvider(mode: PermissionMode) async throws {
+        let fixture = try AgentFixture(); defer { fixture.cleanup() }
+        let secret = "fixture private content not for model"
+        try Data(secret.utf8).write(to: fixture.workspace.appendingPathComponent(".env"))
+        let transport = SingleToolTransport(name: "read_file", arguments: #"{"path":".env"}"#)
+        let runtime = try EngineRuntime(databaseURL: fixture.database, credentials: MemoryCredentialStore(), modelClient: ModelClient(transport: transport))
+        let profile = ProviderProfile(name: "fixture", api: .openAIChat, baseURL: "https://fixture.invalid/v1", model: "fixture")
+        _ = try await runtime.saveProviderProfile(profile, apiKey: nil, clearCredential: false)
+        let session = try await runtime.createSession(title: "deny read", workspacePath: fixture.workspace.path)
+        let run = try await runtime.submit(sessionID: session.id, prompt: "read", requestID: UUID(), configuration: .init(profile: profile, permissionMode: mode))
+        let pending = try await pendingInvocation(runtime, runID: run.id)
+        #expect(pending.blobID == nil && pending.beforeBlobID == nil && pending.output == nil)
+        _ = try await runtime.decideApproval(invocationID: pending.id, requestHash: pending.requestHash, approved: false)
+        #expect(try await complete(runtime, sessionID: session.id, runID: run.id).state == .completed)
+        let denied = try await runtime.invocation(id: pending.id)
+        #expect(denied.state == .denied && denied.blobID == nil && denied.beforeBlobID == nil)
+        #expect(await transport.requests.count == 2)
+        for request in await transport.requests {
+            #expect(!String(decoding: request.httpBody ?? Data(), as: UTF8.self).contains(secret))
+        }
+        let blobs = fixture.database.deletingLastPathComponent().appendingPathComponent("blobs")
+        for file in try FileManager.default.contentsOfDirectory(at: blobs, includingPropertiesForKeys: nil) {
+            #expect(!String(decoding: try Data(contentsOf: file), as: UTF8.self).contains(secret))
+        }
+    }
+
+    @Test(arguments: PermissionMode.allCases)
+    func writeBaselineIsCapturedOnlyAfterAuthorizationAndEditCompletes(mode: PermissionMode) async throws {
+        let fixture = try AgentFixture(); defer { fixture.cleanup() }
+        let original = Data("baseline fixture".utf8)
+        let file = fixture.workspace.appendingPathComponent("file.txt")
+        try original.write(to: file)
+        let hash = SHA256.hash(data: original).map { String(format: "%02x", $0) }.joined()
+        let transport = WriteCallTransport(expectedHash: hash)
+        let runtime = try EngineRuntime(databaseURL: fixture.database, credentials: MemoryCredentialStore(), modelClient: ModelClient(transport: transport))
+        let profile = ProviderProfile(name: "fixture", api: .openAIChat, baseURL: "https://fixture.invalid/v1", model: "fixture")
+        _ = try await runtime.saveProviderProfile(profile, apiKey: nil, clearCredential: false)
+        let session = try await runtime.createSession(title: "baseline", workspacePath: fixture.workspace.path)
+        let run = try await runtime.submit(sessionID: session.id, prompt: "edit", requestID: UUID(), configuration: .init(profile: profile, permissionMode: mode))
+        if mode == .requestApproval {
+            let pending = try await pendingInvocation(runtime, runID: run.id)
+            #expect(pending.beforeBlobID == nil && pending.blobID == nil)
+            #expect(try Data(contentsOf: file) == original)
+            let baselinePath = fixture.database.deletingLastPathComponent().appendingPathComponent("blobs/" + hash)
+            #expect(!FileManager.default.fileExists(atPath: baselinePath.path))
+            _ = try await runtime.decideApproval(invocationID: pending.id, requestHash: pending.requestHash, approved: true)
+        }
+        #expect(try await complete(runtime, sessionID: session.id, runID: run.id).state == .completed)
+        let item = try #require(try await runtime.invocations(runID: run.id).first)
+        #expect(item.state == .completed && item.beforeBlobID == hash && item.blobID != nil)
+        #expect(try String(contentsOf: file, encoding: .utf8) == "agent edit")
+        #expect(try Data(contentsOf: fixture.database.deletingLastPathComponent().appendingPathComponent("blobs/" + hash)) == original)
+        #expect(await transport.requestCount == 2)
+    }
+
     @Test func retryUsesOriginalConfigurationAfterProfileUpdateAndRejectsChangedPayload() async throws {
         let fixture = try AgentFixture(); defer { fixture.cleanup() }
         let transport = CapturingTransport()
@@ -130,7 +254,7 @@ struct AgentRuntimeTests {
         let profile = ProviderProfile(name: "fixture", api: .openAIChat, baseURL: "https://fixture.invalid/v1", model: "fixture")
         _ = try await runtime.saveProviderProfile(profile, apiKey: nil, clearCredential: false)
         let session = try await runtime.createSession(title: "receipt failure", workspacePath: fixture.workspace.path)
-        let run = try await runtime.submit(sessionID: session.id, prompt: "edit", requestID: UUID(), configuration: .init(profile: profile, permissionMode: .manual))
+        let run = try await runtime.submit(sessionID: session.id, prompt: "edit", requestID: UUID(), configuration: .init(profile: profile, permissionMode: .requestApproval))
         let deadline = ContinuousClock.now + .seconds(4)
         var pending: ToolInvocationSnapshot?
         while pending == nil {

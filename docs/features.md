@@ -75,7 +75,7 @@ Claude Code 자체에 동일한 디버거 UI가 있다고 주장하지 않는다
 | **LAT-EXEC-002 / L** 환경 준비 | PATH·toolchain·SDK/runtime·package manager·lockfile을 진단하고 허용된 setup profile로 dependency/worktree 환경을 준비한다. `.worktreeinclude`의 선택 파일 전달도 source/target별로 검증한다. | fresh worktree에서 필요한 dependency/env가 준비되어 테스트가 실행된다. 실패·취소·재실행 상태를 구분하고 프로젝트를 열거나 파일을 발견했다는 이유만으로 설치 script를 실행하지 않는다. |
 | **LAT-EXEC-003 / L** 검증 결과 모델 | test/build 결과를 case ID·실행 profile·소스 revision·환경·상태·duration·원본 artifact와 연결한다. 지원 adapter는 xcresult/JUnit 등 결과 형식을 읽는다. | 0 tests·skipped·cancelled·일부만 실행·기존 실패와 새 실패를 구분한다. exit 0 또는 이전 revision의 성공만으로 현재 수정 검증 완료를 표시하지 않는다. |
 | **LAT-DEBUG-001 / L+I** 디버거 제어 | LLDB-DAP를 시작 adapter로 launch/attach, breakpoint·exception stop, continue/pause/step, threads/stack을 typed tool과 공통 UI/CLI에서 제어한다. | 실행 가능한 debug fixture에서 breakpoint 적중→step→실제 frame 확인→수정·재실행을 완료한다. adapter/toolchain별 미지원 capability를 표시한다. |
-| **LAT-DEBUG-002 / L+I** 상태 검사 | stopped 상태의 scopes/variables/watch와 명시적 evaluate를 지원한다. session/stop generation으로 frame·변수 handle을 식별한다. | resume 뒤 낡은 handle을 거절하고 큰 변수는 페이지/한도로 처리한다. evaluate·조건식·formatter의 코드 실행 가능성을 effect로 취급해 Plan/권한을 우회하지 않는다. |
+| **LAT-DEBUG-002 / L+I** 상태 검사 | stopped 상태의 scopes/variables/watch와 명시적 evaluate를 지원한다. session/stop generation으로 frame·변수 handle을 식별한다. | resume 뒤 낡은 handle을 거절하고 큰 변수는 페이지/한도로 처리한다. evaluate·조건식·formatter의 코드 실행 가능성을 effect로 취급해 계획 작업 제약이나 권한을 우회하지 않는다. |
 | **LAT-DEBUG-003 / L+I** 디버거 수명 | 디버거·debuggee 소유자, launch/attach, detach/terminate, timeout/cancel/adapter crash를 기록한다. | 자신이 launch한 프로세스 종료와 외부 attach 대상 detach를 구분한다. 재시작 후 PID만으로 자동 attach/종료하지 않고 debug stop을 agent 완료로 오인하지 않는다. |
 
 ### Web·이미지·문서 입력
@@ -93,28 +93,34 @@ Web 검색 서비스, PDF renderer, PTY emulator의 구체 라이브러리는 �
 
 ## 4. 계획·권한·실행 격리
 
-참고 동작: 공식 권한 모드는 Manual/default, acceptEdits, plan, auto, dontAsk, bypassPermissions로 구분된다. Auto는 일상적인 승인 창을 없애는 단순 allow 모드가 아니라 별도 classifier 검토를 사용한다. [권한 규칙](https://code.claude.com/docs/en/permissions), [모드 설명](https://code.claude.com/docs/en/permission-modes)
+Lathe의 사용자 선택 권한 모드는 아래 네 가지다. Claude Code의 모드 이름을 그대로 복제하는 계약이 아니다.
+계획 수립은 별도 작업 유형이며 권한 선택기에 `plan`이나 `dontAsk`를 제공하지 않는다.
 
-Lathe는 아래 의미를 UI와 CLI에서 일관되게 구현한다. 명칭은 UI 번역에 따라 바뀔 수 있지만 내부 모드와 권한 결정을 안정적으로 기록한다.
-
-| 모드 | Lathe 동작 |
+| 모드 | 동작 |
 | --- | --- |
-| `manual` | 범위 내 읽기와 명시적 허용 규칙을 적용하고, 승인되지 않은 쓰기·명령·네트워크 효과는 요청한다. |
-| `acceptEdits` | 허용 workspace의 구조화된 파일 변경을 자동 승인한다. 임의 shell·외부 효과 전체를 자동 승인하지 않는다. |
-| `plan` | 소스 변경과 부작용 도구를 막고 탐색·질문·계획 revision을 허용한다. 계획은 앱 저장소에 저장한다. |
-| `auto` | 명시적 deny와 격리 정책을 먼저 적용하고, 별도 평가기가 사용자 의도·인수·효과를 검사한다. 불확실하면 승인 대기로 간다. |
-| `dontAsk` | UI를 띄우지 않는다. 기존 규칙으로 허용되지 않은 호출은 거부 결과를 모델/호출자에게 반환한다. |
-| `bypass` | 사용자가 명시적으로 고른 세션에서 일상 tool 승인 창을 건너뛴다. OS 권한·실행 격리·실행 한도·강제 정책을 없애지 않는다. |
+| `fullAccess` / 전체 권한 | 사용자 요청 범위의 읽기·쓰기·실행을 추가 승인 없이 진행한다. 도구의 경로·입력 검증, OS 권한, 실행 한도, 취소와 기록은 유지한다. |
+| `autoApprove` / 자동 승인 | 낮은 위험으로 분류한 작업만 자동 진행한다. 그 외 또는 판단할 수 없는 작업은 실행 전에 승인한다. |
+| `acceptEdits` / 편집 허용 | 허용 workspace의 읽기와 구조화된 파일 쓰기를 자동 진행하고 명령 실행은 승인한다. |
+| `requestApproval` / 승인 요청 | 읽기·목록·쓰기·명령 실행 모두 실행 전에 승인한다. 기본 모드다. |
 
-`acceptEdits`의 정확한 자동 허용 범위와 `bypass`의 강제 정책 유지 등은 Lathe 설계이며 Claude Code의 모든 세부 규칙을 그대로 모사한다는 뜻은 아니다. Auto 평가기의 공급자·비용·실패 정책이 구현되지 않았으면 해당 모드를 비활성으로 표시하고 완료로 주장하지 않는다.
-Plan 진입은 세션 소유 writer/process의 중지·대기와 mutation hook/전처리 차단을 포함한다. 이 세션이 요청한 source 변경을 막는 계약이며 다른 editor나 세션까지 파일을 동결하는 보장은 아니다.
+첫 Auto 구현은 검토 가능한 결정 규칙을 사용한다. 일반 소스·문서 경로의 읽기·쓰기는 자동 허용하되
+숨김·설정·자격 증명·실행 관련·분류 불명확 경로는 승인한다. 명령은 정확한 executable/argv의 좁은
+허용 목록만 자동 실행하고 나머지는 승인한다. shell prefix나 모델의 안전하다는 설명으로 허용하지 않는다.
+이 분류기는 자유형 AI reviewer나 Claude의 내부 classifier를 구현했다는 뜻이 아니다.
+`requestApproval`의 승인 대상에 읽기도 포함되므로 `acceptEdits`와 명확히 구분된다.
+기존 저장 기록의 `manual`/`plan`/`dontAsk`는 읽을 때 `requestApproval`로 보수적으로 변환하며
+자동 재개하지 않는다. 새 실행과 UI/CLI는 네 가지 새 이름만 사용한다.
+
+계획만 요청한 작업은 탐색·질문·계획 revision에 한정하며 실제 변경은 후속 실행으로 분리한다.
+계획을 승인했다고 선택한 권한 모드가 바뀌거나 향후 도구 전체가 승인되는 것은 아니다.
+계획 작업의 변경 금지 제약은 별도 실행 경계이며 다른 editor나 세션까지 파일을 동결하는 보장은 아니다.
 
 | ID / 분류 | Lathe 요구사항 | 수용 기준 |
 | --- | --- | --- |
-| **LAT-PERM-001 / L** 모드·규칙 | allow/ask/deny 규칙을 tool, 파일 범위, executable/arguments, network target에 적용한다. deny 우선, 출처·유효 범위·만료를 보여준다. | 모드 전환은 다음 실행 경계부터 적용된다. UI·CLI·subagent·background가 같은 정책 결정을 사용한다. |
+| **LAT-PERM-001 / L** 모드·규칙 | 네 모드의 자동 실행/승인 범위를 tool·파일·executable/arguments·network target에 적용한다. 강제 제한을 우선하며 규칙·승인 출처·유효 범위·만료를 보여준다. 낮은 단계의 allow 규칙이 requestApproval의 사전 승인을 없애지 못한다. | 모드 전환은 다음 실행 경계부터 적용된다. UI·CLI·subagent·background가 같은 정책 결정을 사용한다. |
 | **LAT-PERM-002 / L** 승인 UI | 목적·정확한 대상·diff/명령·작업 경로·효과를 보여주고 한 번, 세션, 프로젝트 규칙의 범위를 구분한다. 승인/거절에 코멘트를 달 수 있다. | 승인 후 인수나 파일 revision이 바뀌면 기존 승인을 재사용하지 않는다. 승인 대기 중 취소·앱 재시작에도 자동 실행하지 않는다. |
-| **LAT-PERM-003 / L** 계획 모드 | 탐색 결과, 목표, 변경 파일 후보, 단계, 검증 방식, 미해결 질문을 plan revision으로 저장한다. 검토·수정·선택 실행을 제공한다. | plan 실행 전에는 소스가 바뀌지 않는다. 사용자가 승인한 plan revision과 실제 실행이 연결되며 계획 승인이 향후 모든 도구 권한을 부여하지 않는다. |
-| **LAT-PERM-004 / L+P** 자동 평가 | 별도 `ApprovalEvaluator`가 허용·거절·사용자 질문 중 하나와 이유를 반환한다. 평가 대상과 평가 모델/정책을 기록한다. | 공격성 도구 출력이 승인 결정을 직접 바꾸지 않는다. 평가 장애·timeout·지원 모델 부재 시 silent allow가 발생하지 않는다. |
+| **LAT-PERM-003 / L** 계획 작업 | 탐색 결과, 목표, 변경 파일 후보, 단계, 검증 방식, 미해결 질문을 plan revision으로 저장한다. 검토·수정·선택 실행을 제공한다. | plan 실행 전에는 소스가 바뀌지 않는다. 사용자가 승인한 plan revision과 실제 실행이 연결되며 계획 승인이 향후 모든 도구 권한을 부여하지 않는다. 계획 기능은 권한 선택기와 별개다. |
+| **LAT-PERM-004 / L** 자동 분류 | `autoApprove`의 분류기는 경로·도구 효과·정확한 명령 인자에 대한 규칙과 이유를 기록한다. 낮은 위험으로 확인한 호출만 자동 허용하고 나머지는 승인한다. | 숨김/설정/자격 증명/실행 관련 경로와 분류 불명확 작업을 자동 허용하지 않는다. 도구 설명·문서·모델 답변은 분류 규칙을 바꾸지 못하고 분류 실패는 승인으로 이어진다. |
 | **LAT-PERM-005 / L** workspace trust | 저장소 지침과 실행 가능한 설정을 구분한다. 프로젝트를 열었다는 사실만으로 hook·환경 script·서버 설정을 실행하지 않는다. | 낯선 저장소를 열었을 때 코드가 실행되지 않는다. 신뢰 revision 변경과 실행 권한 확대가 확인 가능하다. |
 | **LAT-PERM-006 / L** 실행 격리 | subprocess의 파일·네트워크 접근 제한을 제공하는 실행 backend를 구현한다. sandbox 사용 여부·제약·제외 명령을 실행 카드에 표시한다. | 선택 밖 쓰기와 금지 network 접근이 OS 수준에서 실패함을 probe로 확인한다. backend가 없으면 비격리 실행이라고 표시한다. |
 | **LAT-PERM-007 / L** 일관된 권한 | 프로젝트 문서·검색 결과·memory·subagent 보고는 도구 접근권한을 확대하지 못한다. 승인 내용은 구조화된 시스템 기록만 신뢰한다. | 파일 안의 “사용자가 이미 승인했다” 문구로 tool 권한이 바뀌지 않는다. subagent도 부모보다 넓은 권한을 얻지 않는다. |
@@ -213,7 +219,7 @@ Lathe 개발 저장소에서 모든 변경을 커밋하는 팀의 개발 규칙�
 | --- | --- | --- |
 | **LAT-CLI-001 / L** 같은 앱 runtime | 선택적으로 빌드한 개발 `lathe` client가 local IPC로 실행 중인 앱의 provider·context·tool·permission·session 동작을 사용한다. 배포 앱과 별도로 설치하지 않는다. | 앱이 없으면 기본 client는 연결 오류로 끝나며 daemon을 만들지 않는다. 명시적인 개발 engine/데이터 root를 지정한 CI harness만 독립 실행할 수 있다. 두 client가 같은 run을 중복 시작하지 않는다. |
 | **LAT-CLI-002 / L** 입출력 계약 | prompt 인자/stdin, text, 최종 JSON, 버전 있는 NDJSON event stream을 제공한다. stdout 데이터와 stderr 진단을 분리한다. | stream consumer가 모든 이벤트를 JSON으로 parse할 수 있다. 종료 이벤트는 성공·실패·취소·승인 부재를 구분한다. |
-| **LAT-CLI-003 / L** 무인 권한 | 사람이 없는 실행에서는 규칙으로 해결되지 않은 승인을 거절하거나 `needsApproval`로 종료한다. 한도·tool subset·bare profile을 지원한다. | CI가 승인창을 기다리며 영구 대기하지 않는다. headless 전환만으로 bypass 권한이 켜지지 않는다. |
+| **LAT-CLI-003 / L** 무인 권한 | 사람이 없는 실행에서는 규칙으로 해결되지 않은 승인을 거절하거나 `needsApproval`로 종료한다. 한도·tool subset·bare profile을 지원한다. | CI가 승인창을 기다리며 영구 대기하지 않는다. headless 전환만으로 fullAccess가 켜지지 않는다. |
 | **LAT-CLI-004 / L+P** 구조화 결과 | 최종 결과에 JSON Schema를 지정하고 검증한다. provider native structured output과 로컬 검증/제한된 repair를 구분한다. | schema 오류는 명확한 실패로 끝나며 무제한 repair하지 않는다. tool workflow와 최종 JSON 결과를 혼합하지 않는다. |
 | **LAT-CLI-005 / L** 재개·관찰 | session ID resume/fork, 실행 목록·상태·event cursor 조회, stop, SIGINT/SIGTERM을 지원한다. | 중지 시 subprocess cleanup과 저장을 시험한다. 관찰 연결이 끊겨도 실행 owner의 정책대로 동작한다. |
 | **LAT-CLI-006 / I** CI 연동 | GitHub Actions에서 명시적인 개발 빌드/harness로 client를 호출하고 결과·diff·log를 남긴다. 일반 배포 artifact에는 앱만 담는다. | macOS runner의 mock provider 실행을 재현한다. 실제 API key는 fixture·출력·저장소에 넣지 않는다. |
@@ -260,21 +266,21 @@ Lathe 개발 저장소에서 모든 변경을 커밋하는 팀의 개발 규칙�
 
 ### 도구와 MCP 자동화
 
-[확장 계약](extensions.md)은 MCP wire/config 호환을, [검색·MCP 제작 계약](tools-and-mcp-authoring.md)은
-실제 도구 목록·설정/제작 흐름·실패 복구를 소유한다. 아래 기능도 최종 제품의 필수 범위다.
+[확장 계약](extensions.md)은 MCP wire/config 호환을, [검색·MCP 설치 계약](tools-and-mcp-setup.md)은
+실제 도구 목록·문서 기반 기존 서버 설치/설정 흐름·실패 복구를 소유한다. 아래 기능도 최종 제품의 필수 범위다.
 
 | ID / 분류 | Lathe 요구사항 | 수용 기준 |
 | --- | --- | --- |
 | **LAT-MCP-001 / L+I** 전체 client | stdio·Streamable HTTP·legacy SSE, tools/resources/prompts, pagination/list 변경, progress/cancel/reconnect를 지원한다. | transport·protocol version·capability별 테스트와 지원 상태가 존재한다. SDK 설치만으로 최신 protocol 전체 지원을 표시하지 않는다. |
 | **LAT-MCP-002 / L** 도구 탐색 | 도구 이름·설명·schema·연결 상태를 검색하고 필요한 schema만 context에 로드한다. builtin/skill/MCP의 출처를 구분한다. | 많은 도구에서도 선택→schema load→call이 된다. schema/연결 revision이 바뀐 오래된 호출은 재검증한다. |
 | **LAT-MCP-003 / L+I** 인증·사용자 입력 | API key/header/env 참조, OAuth, elicitation, 실제 지원하는 roots/sampling 등을 제공한다. | secret은 Keychain 참조로 등록하고 모델·로그로 누출하지 않는다. capability별 입력·거절·만료·예산을 검증한다. |
-| **LAT-MCP-004 / L+I** 자동 설정 | 자연어 요청으로 기존 서버 조사→설정 계획→의존성/credential 확인→연결 시험→등록/활성화→실제 호출을 수행한다. | 승인된 scope 안에서는 매 단계 재승인 없이 완료한다. 누락 secret/OAuth 상호작용/권한 확대가 필요한 단계만 이유와 함께 기다린다. |
-| **LAT-MCP-005 / L** 서버 제작 | 필요한 도구의 입력·출력·효과를 정의하고 SDK template, 소스, dependency pin, 실행 설정, 사용 안내를 생성한다. | 실제 build 가능한 서버 산출물과 소유 경로가 남는다. Swift 앱 코어와 별도로 사용자가 허용한 Swift/TypeScript/Python 서버 runtime을 사용할 수 있다. |
-| **LAT-MCP-006 / L** 제작 검증 | schema/unit/protocol/실제 agent 왕복 검증을 통해 만든 서버를 사용한다. mock과 실제 연결 검증을 구분한다. | initialize→list→call→결과 활용과 실패/timeout/cancel을 통과해야 활성 검증 완료가 된다. destructive tool은 허용된 fixture 대상으로 검증한다. |
+| **LAT-MCP-004 / L+I** 문서 기반 설정 | 사용자가 준 GitHub/Markdown/설치 문서를 읽고 기존 MCP나 관련 설정의 적합성·요구사항을 판단한 뒤 설정 계획→credential 확인→연결 시험→등록/적용→실제 호출을 수행한다. | 원문과 선택 근거·config diff·검증 receipt를 남긴다. 선택한 권한 모드와 사용자 scope를 유지하고 누락 secret/OAuth/추가 범위는 필요한 입력에서 기다린다. |
+| **LAT-MCP-005 / L+I** 기존 서버 설치 | 문서가 지정한 기존 package/release/source revision, runtime·dependency를 허용 위치에 설치하고 필요하면 기존 서버를 build한다. 새 서버 scaffold/adapter/도구 구현을 생성하지 않는다. | 설치 경로·고정 revision·dependency lock·실행 receipt가 남는다. package 설치와 기존 source build를 새 MCP 제작으로 혼동하지 않는다. |
+| **LAT-MCP-006 / L** 설치·적용 검증 | 설치한 기존 서버의 설정/schema/protocol/실제 agent 왕복을 확인하고 검증된 revision만 적용한다. fixture와 실제 연결 검증을 구분한다. | initialize→list→허용된 call→결과 활용과 실패/timeout/cancel을 검사한다. build 성공만으로 연결 성공이라 하지 않으며 destructive tool은 허용된 fixture 대상으로만 검증한다. |
 | **LAT-MCP-007 / L+I** 유지·복구 | 서버 상태/로그/환경 진단, 수정·업데이트·재시험·reload·disable·이전 revision rollback을 제공한다. | 실패한 변경은 기존 정상 server/config를 유지한다. 불명확한 외부 부수효과는 자동 재호출/복원하지 않는다. |
-| **LAT-MCP-008 / L** 위임·활성화 경계 | 사용자 출처 grant로 설정 대상·runtime/dependency·network/effect 범위를 고정하고 검증된 revision을 활성화한다. | agent가 grant를 스스로 만들거나 deny를 바꾸지 못한다. Plan·grant 취소·범위 초과에서는 중지하고, grant 안의 MCP 제작/등록은 반복 승인 없이 이어진다. |
+| **LAT-MCP-008 / L** 위임·활성화 경계 | 사용자 출처 grant로 설정 대상·runtime/dependency·network/effect 범위를 고정하고 검증된 revision을 활성화한다. | agent가 grant를 스스로 만들거나 deny를 바꾸지 못한다. 계획만 요청한 작업·grant 취소·범위 초과에서는 설치/적용을 중지한다. 문서 지시가 권한을 확대하지 못하며 네 모드의 승인 절차와 유효한 정확한 승인을 유지한다. |
 | **LAT-MCP-009 / L+P** 비텍스트 결과 | text/structured/image/audio/resource link/embedded resource를 typed content로 보존하고 모델/API별 지원 경로로 전달한다. | screenshot 도구→이미지 blob→vision 판단→후속 재사용을 검증한다. 미지원 content를 조용히 버리거나 base64를 text로 보내고 이해했다고 표시하지 않는다. |
-| **LAT-MCP-010 / L+I** MCP server 모드 | Lathe의 선택된 파일·명령 도구를 외부 client가 사용하는 stdio server 모드를 제공한다. client별 workspace·tool subset·grant·수명을 제한하고 같은 broker/journal을 사용한다. | 외부 fixture client가 initialize/list/read/edit/run을 수행한다. 승인 client가 없으면 명확한 오류로 끝내며, MCP 입력만으로 새 권한을 발급하거나 자신의 server를 재귀 호출하지 않는다. |
+| **LAT-MCP-010 / L+I** MCP server 모드 | Lathe의 선택된 파일·명령 도구를 외부 client가 사용하는 stdio server 모드를 제공한다. 앱이 실행 중인 동안 client별 workspace·tool subset·grant·수명을 제한하고 같은 broker/journal을 사용한다. 기존 서버 설치 흐름과는 별도 기능이다. | 외부 fixture client가 initialize/list/read/edit/run을 수행한다. 승인 client가 없으면 명확한 오류로 끝내며, MCP 입력만으로 새 권한을 발급하거나 자신의 server를 재귀 호출하지 않는다. |
 | **LAT-EXT-001 / L+I** plugin 의존성 | plugin 간 직접/전이 dependency·version 제약·source·lock과 설치/업데이트/disable/remove를 graph로 처리한다. | A→B 설치와 충돌/cycle/누락 실패를 구분한다. 업데이트 실패는 기존 정상 graph를 유지하고 B 제거 시 A의 실행 가능 상태를 재검사한다. package SDK lock과 구분한다. |
 
 ## 11. 외부/hosted 기능의 별도 계약
@@ -307,7 +313,7 @@ Lathe 개발 저장소에서 모든 변경을 커밋하는 팀의 개발 규칙�
 | 시나리오 | 연결 요구사항 | 통과 기준 |
 | --- | --- | --- |
 | **E2E-01 버그 수정** | LAT-CORE-001/007, LAT-TOOL-001~004/006~007, LAT-GIT-001 | 실패 재현→관련 코드 검색→다중 파일 수정→테스트→diff/결과 보고 |
-| **E2E-02 계획 후 구현** | LAT-PERM-001~003, LAT-CORE-003/004 | plan 중 소스 불변→질문→계획 수정→선택 실행→승인 정책 유지 |
+| **E2E-02 계획 후 구현** | LAT-PERM-001~003, LAT-CORE-003/004 | 계획 작업 중 소스 불변→질문→계획 수정→선택 실행→승인 정책 유지 |
 | **E2E-03 중단과 재개** | LAT-CORE-002/006, LAT-SESSION-001/003/005/006 | 명령·편집 중 취소/강제 종료→이력 복원→중복 효과 없이 재개/복원 |
 | **E2E-04 장기 세션** | LAT-CTX-001~004, LAT-MEM-001~004 | 긴 tool 출력→compaction→provider 변경→목표·지침 유지→새 세션 기억 |
 | **E2E-05 병렬 구현** | LAT-TASK-001~005, LAT-GIT-003/004 | 조사 agent와 두 worktree writer→실패/승인 처리→결과 검토·통합 |
@@ -325,8 +331,8 @@ Lathe 개발 저장소에서 모든 변경을 커밋하는 팀의 개발 규칙�
 | **E2E-17 추론 단계** | LAT-REASON-001/002/006/007 | native 옵션과 원격 vLLM/Ollama Off/On→실제 payload 검사→미지원/무시 옵션 표시→재개 시 snapshot 유지 |
 | **E2E-18 Ultra** | LAT-REASON-003~008, LAT-TASK-003~005 | 동일 local 모델의 역할 분담→서버 큐·공유 예산→단일 writer/별도 worktree→독립 검토/테스트→중간 실패·취소·재개 |
 | **E2E-19 독립 검색** | LAT-TOOL-001/011/012, LAT-MCP-002 | local 모델로 코드 검색·웹 검색·본문 읽기·도구 검색을 구분 수행→출처→backend 실패/필터 미지원 표시 |
-| **E2E-20 MCP 자동 설정** | LAT-MCP-001~004/007/008 | 자연어 연결 요청→인증 참조→실제 시험→허용 scope 등록/활성화→호출→연결 단절·token 만료·설정 rollback |
-| **E2E-21 MCP 자체 제작** | LAT-MCP-005~008 | 요구 분석→server scaffold→build→schema/protocol 테스트→등록→agent가 새 도구 사용→업데이트 실패 복구·grant 취소 |
+| **E2E-20 MCP 문서 설정** | LAT-MCP-001~004/007/008 | 사용자 링크 원문 읽기→기존 서버·설정 판단→인증 참조→실제 시험→허용 scope 적용→호출→연결 단절·token 만료·설정 rollback |
+| **E2E-21 MCP 기존 서버 설치** | LAT-MCP-005~008 | GitHub/Markdown 설치법→고정 기존 package·의존성 설치 또는 기존 source build→설정→실제 MCP 시험→적용→업데이트 실패 복구·grant 취소·문서의 권한 확대 거절 |
 | **E2E-22 실행 환경 재현** | LAT-EXEC-001~003, LAT-GIT-003 | profile 선택→fresh worktree setup→build/test→case별 증거→취소·setup 실패·0 tests·오래된 결과 구분 |
 | **E2E-23 실제 디버깅** | LAT-DEBUG-001~003, LAT-EXEC-001 | launch/attach→breakpoint→stack/variable→step→원인 수정→재실행; stale handle·adapter crash·외부 대상 detach |
 | **E2E-24 여러 저장소** | LAT-WORKSPACE-001, LAT-GIT-001~004 | frontend/backend root 추가→각 cwd·지침·권한으로 변경/검증→저장소별 diff→fork의 root 제거 격리·전역 철회·resume |

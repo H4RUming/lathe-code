@@ -98,24 +98,39 @@ struct AppModelTests {
         #expect(await engine.connectionCount == 1)
     }
 
-    @Test func realSubmissionFreezesConnectionAndPermissionBeforeAsyncWork() async throws {
+    @Test(arguments: PermissionMode.allCases)
+    func realSubmissionFreezesConnectionAndPermissionBeforeAsyncWork(mode: PermissionMode) async throws {
         let engine = FixtureEngine()
         await engine.holdSubmission()
         let model = LatheAppModel(client: engine)
         await model.connect()
         model.selectedProfileID = engine.profile.id
-        model.permissionMode = .acceptEdits
+        model.permissionMode = mode
         model.draft = "real fixture request"
         model.sendPrompt()
         // Settings changing while the submit task starts must not change its payload.
         model.selectedProfileID = nil
-        model.permissionMode = .plan
+        model.permissionMode = mode == .fullAccess ? .requestApproval : .fullAccess
         try await waitUntil { await engine.submissionCount == 1 }
         #expect(await engine.submittedConfiguration?.profile == engine.profile)
-        #expect(await engine.submittedConfiguration?.permissionMode == .acceptEdits)
+        #expect(await engine.submittedConfiguration?.permissionMode == mode)
         await engine.releaseSubmission()
         try await waitUntil { !model.isSubmitting }
         #expect(model.draft.isEmpty)
+    }
+
+    @Test func requestApprovalIsDefaultAndReadToolsUseExactHashApproval() async throws {
+        let engine = FixtureEngine()
+        let invocation = await engine.seedApproval(effect: .read)
+        let model = LatheAppModel(client: engine)
+        #expect(model.permissionMode == .requestApproval)
+        await model.connect()
+        #expect(model.toolInvocations[invocation.runID]?.first?.effect == .read)
+        #expect(model.toolInvocations[invocation.runID]?.first?.state == .pendingApproval)
+        model.decideApproval(invocation, approved: true)
+        try await waitUntil { await engine.approvalCount == 1 && model.decidingApprovals.isEmpty }
+        #expect(await engine.approvalHash == invocation.requestHash)
+        #expect(model.toolInvocations[invocation.runID]?.first?.state == .approved)
     }
 
     @Test func approvalUsesDisplayedHashAndIgnoresLateResultAfterSessionChange() async throws {
@@ -418,10 +433,10 @@ private actor FixtureEngine: AppEngineClient {
         tool = snapshot
         return snapshot
     }
-    func seedApproval() -> ToolInvocationSnapshot {
+    func seedApproval(effect: ToolEffect = .write) -> ToolInvocationSnapshot {
         let run = RunSnapshot(sessionID: firstID, prompt: "fixture approval", configuration: RunConfiguration(profile: profile))
         completedRun = run
-        let snapshot = ToolInvocationSnapshot(runID: run.id, callID: "fixture-call", name: "write_file", arguments: "{}", requestHash: String(repeating: "a", count: 64), summary: "Write fixture", effect: .write, state: .pendingApproval)
+        let snapshot = ToolInvocationSnapshot(runID: run.id, callID: "fixture-call", name: effect == .read ? "read_file" : "write_file", arguments: "{}", requestHash: String(repeating: "a", count: 64), summary: "Fixture tool request", effect: effect, state: .pendingApproval)
         tool = snapshot
         return snapshot
     }

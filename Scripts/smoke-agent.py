@@ -96,7 +96,7 @@ class FixtureServer(ThreadingHTTPServer):
             return sse({"type": "response.output_text.delta", "delta": text}) + \
                 sse({"type": "response.completed", "response": {"status": "completed", "output": output}})
         assert path == "/prefix/v1/chat/completions", path
-        if scenario == "flow":
+        if scenario in {"flow", "full-access", "full-headless", "auto-approve", "edit-allow"}:
             if not results:
                 return chat_tool("read_file", {"path": "source.txt"}, "flow_read")
             if len(results) == 1:
@@ -105,16 +105,27 @@ class FixtureServer(ThreadingHTTPServer):
                 return chat_tool("write_file", {"path": "source.txt", "content": "after 🌿\n", "expectedSHA256": previous["sha256"]}, "flow_write")
             if len(results) == 2:
                 assert json.loads(results[-1]["content"])["written"] is True
-                return chat_tool("run_command", command("/usr/bin/printf", ["lathe shell fixture\\n"]), "flow_command")
-            assert len(results) == 3 and "lathe shell fixture" in results[-1]["content"]
+                operation = command("/bin/pwd", []) if scenario == "auto-approve" else command("/usr/bin/printf", ["lathe shell fixture\\n"])
+                return chat_tool("run_command", operation, "flow_command")
+            assert len(results) == 3
+            assert ("auto-approve" if scenario == "auto-approve" else "lathe shell fixture") in results[-1]["content"]
             return chat_final("파일 수정과 명령 실행을 확인했습니다 🌿")
-        if scenario in {"deny", "plan", "dontAsk", "cancel-approval"}:
+        if scenario in {"deny", "auto-sensitive", "cancel-approval"}:
             if not results:
-                return chat_tool("write_file", {"path": scenario + ".txt", "content": "must not exist", "expectedSHA256": "missing"}, scenario + "_write")
+                path = ".env" if scenario == "auto-sensitive" else scenario + ".txt"
+                return chat_tool("write_file", {"path": path, "content": "must not exist", "expectedSHA256": "missing"}, scenario + "_write")
             assert len(results) == 1
-            if scenario == "deny": assert "거절" in results[0]["content"]
-            else: assert "mode" in results[0]["content"]
+            assert "거절" in results[0]["content"]
             return chat_final("Permission denial was preserved.")
+        if scenario in {"deny-read", "auto-sensitive-read", "auto-command"}:
+            if not results:
+                if scenario == "auto-command":
+                    return chat_tool("run_command", command("/bin/sh", ["-c", "printf no > unexpected.txt"]), "review_command")
+                path = ".env" if scenario == "auto-sensitive-read" else "source.txt"
+                return chat_tool("read_file", {"path": path}, "review_read")
+            assert len(results) == 1 and "거절" in results[0]["content"]
+            assert "before" not in results[0]["content"] and "fixture-secret" not in results[0]["content"]
+            return chat_final("Denied tool content was not disclosed.")
         if scenario == "truncated":
             return chat_tool("write_file", '{"path":"truncated.txt","content":', finish="length")
         if scenario == "eof":
@@ -228,13 +239,16 @@ def main():
                 return json_call("provider-set", "--name", "Loopback fixture", "--api", api, "--model", "fixture-model",
                                  "--base-url", f"http://127.0.0.1:{server.server_port}/{path}", "--allow-http", "--json")["id"]
 
-            def begin(scenario, profile, permission="manual"):
+            def begin(scenario, profile, permission=None):
                 workspace = projects / scenario
                 workspace.mkdir()
                 (workspace / "source.txt").write_text("before 🌱\n")
+                if scenario == "auto-sensitive-read":
+                    (workspace / ".env").write_text("fixture-secret=synthetic-only\n")
                 session = json_call("new", "--workspace", str(workspace), scenario, "--json")["id"]
                 request_id = str(uuid.uuid4())
-                words = ("run", "--session", session, "--provider", profile, "--permission", permission,
+                mode = ("--permission", permission) if permission else ()
+                words = ("run", "--session", session, "--provider", profile, *mode,
                          "--request-id", request_id, "--detach", "fixture:" + scenario)
                 run = json_call(*words)
                 active_runs.add(run["id"])
@@ -283,7 +297,12 @@ def main():
                 responses_profile = create_profile("openAIResponses")
 
                 run, workspace, retry = begin("flow", chat_profile)
+                assert run["configuration"]["permissionMode"] == "requestApproval"
+                read = pending(run, "read_file")
+                assert server.count("flow") == 1 and "output" not in read and "blobID" not in read
+                decide(read)
                 write = pending(run, "write_file")
+                assert "beforeBlobID" not in write
                 assert (workspace / "source.txt").read_text() == "before 🌱\n"
                 call("approve", write["id"], "--hash", "0" * 64, expected=1)
                 assert json_call("tool", write["id"], "--json")["state"] == "pendingApproval"
@@ -305,15 +324,46 @@ def main():
                 assert json_call(*retry)["id"] == run["id"]
                 time.sleep(0.1)
                 assert server.count("flow") == 4
-                check("real HTTP model → read → approved atomic write → approved native runner → final, exact-hash approval and idempotent replay")
+                check("default requestApproval gates reads, writes and commands; exact-hash approval and idempotent replay")
 
-                for scenario, mode in [("deny", "manual"), ("plan", "plan"), ("dontAsk", "dontAsk")]:
+                for scenario, mode in [("full-access", "fullAccess"), ("auto-approve", "autoApprove"), ("edit-allow", "acceptEdits")]:
                     run, workspace, _ = begin(scenario, chat_profile, mode)
-                    if scenario == "deny": decide(pending(run, "write_file"), yes=False)
+                    if mode == "acceptEdits":
+                        shell = pending(run, "run_command")
+                        assert (workspace / "source.txt").read_text() == "after 🌿\n"
+                        assert all(item["state"] == "completed" for item in json_call("tools", run["id"], "--json")[:2])
+                        decide(shell)
                     complete(run)
-                    assert not (workspace / (scenario + ".txt")).exists()
+                    assert (workspace / "source.txt").read_text() == "after 🌿\n"
+                    assert all(item["state"] == "completed" for item in json_call("tools", run["id"], "--json"))
+                check("fullAccess executes all tools, autoApprove allows ordinary edits and exact pwd, acceptEdits asks for commands")
+
+                for scenario, mode in [("deny", "requestApproval"), ("auto-sensitive", "autoApprove"),
+                                       ("deny-read", "requestApproval"), ("auto-sensitive-read", "autoApprove"),
+                                       ("auto-command", "autoApprove")]:
+                    run, workspace, _ = begin(scenario, chat_profile, mode)
+                    tool_name = "read_file" if scenario in {"deny-read", "auto-sensitive-read"} else "run_command" if scenario == "auto-command" else "write_file"
+                    item = pending(run, tool_name)
+                    assert "output" not in item and "blobID" not in item and "beforeBlobID" not in item
+                    decide(item, yes=False)
+                    complete(run)
+                    if scenario == "auto-sensitive": assert not (workspace / ".env").exists()
+                    assert not (workspace / (scenario + ".txt")).exists() and not (workspace / "unexpected.txt").exists()
                     assert json_call("tools", run["id"], "--json")[0]["state"] == "denied"
-                check("explicit denial, Plan and dontAsk prevent mutations and return denials to the model")
+                check("denied reads disclose no content; automatic mode asks for sensitive paths and shell execution")
+
+                for old_mode in ("manual", "plan", "dontAsk"):
+                    call("run", "--session", run["sessionID"], "--provider", chat_profile, "--permission", old_mode,
+                         "--detach", "fixture:invalid-mode", expected=1)
+                call("run", "--session", run["sessionID"], "--provider", chat_profile, "fixture:no-approval-client", expected=1)
+                headless_workspace = projects / "full-headless"
+                headless_workspace.mkdir()
+                (headless_workspace / "source.txt").write_text("before 🌱\n")
+                events = call("run", "--workspace", str(headless_workspace), "--provider", chat_profile,
+                              "--permission", "fullAccess", "--json", "fixture:full-headless")
+                assert json.loads(events.splitlines()[-1])["kind"] == "runCompleted"
+                assert (headless_workspace / "source.txt").read_text() == "after 🌿\n"
+                check("CLI rejects retired modes and requires an approval client unless fullAccess is explicit")
 
                 for scenario in ("truncated", "eof"):
                     run, workspace, _ = begin(scenario, chat_profile)
@@ -355,6 +405,7 @@ def main():
                 check("run cancellation closes the in-flight URLSession stream")
 
                 run, _, _ = begin("responses", responses_profile)
+                decide(pending(run, "read_file"))
                 result = complete(run)
                 assert result["response"] == "Responses 연결 왕복 확인 🌱"
                 assert server.count("responses") == 2
